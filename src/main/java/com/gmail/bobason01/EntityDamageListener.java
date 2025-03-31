@@ -32,11 +32,14 @@ import org.intellij.lang.annotations.Subst;
 import java.lang.reflect.Method;
 import java.lang.reflect.Field;
 import net.minecraft.network.syncher.DataWatcherObject;
-import net.minecraft.world.entity.Display;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.List;
+import java.util.ArrayList;
 
 public class EntityDamageListener implements Listener {
     private final DamageDisplay plugin;
     private final Set<Entity> activeTextDisplays = Collections.synchronizedSet(new HashSet<>());
+    private final ConcurrentHashMap<Location, List<TextDisplay>> locationTextDisplays = new ConcurrentHashMap<>();
 
     public EntityDamageListener(DamageDisplay plugin) {
         this.plugin = plugin;
@@ -92,6 +95,24 @@ public class EntityDamageListener implements Listener {
 
         try {
             World world = Objects.requireNonNull(location.getWorld());
+
+            // Remove existing text displays at the location
+            List<TextDisplay> displaysAtLocation = locationTextDisplays.get(location);
+            if (displaysAtLocation != null) {
+                synchronized (displaysAtLocation) {
+                    for (TextDisplay existingDisplay : displaysAtLocation) {
+                        if (existingDisplay != null && !existingDisplay.isDead()) {
+                            existingDisplay.remove();
+                        }
+                    }
+                    displaysAtLocation.clear();
+                }
+            } else {
+                displaysAtLocation = new ArrayList<>();
+                locationTextDisplays.put(location, displaysAtLocation);
+            }
+
+
             TextDisplay textDisplay = (TextDisplay) world.spawnEntity(location, EntityType.TEXT_DISPLAY);
             CraftTextDisplay craftTextDisplay = (CraftTextDisplay) textDisplay;
 
@@ -130,6 +151,11 @@ public class EntityDamageListener implements Listener {
             textDisplay.setShadowed(false);
             textDisplay.setSeeThrough(true);
 
+            final List<TextDisplay> displaysAtLocationFinal = displaysAtLocation; // Make it effectively final
+            synchronized (displaysAtLocationFinal) {
+                displaysAtLocationFinal.add(textDisplay);
+            }
+
             new BukkitRunnable() {
                 double t = 0;
 
@@ -137,6 +163,9 @@ public class EntityDamageListener implements Listener {
                 public void run() {
                     if (t >= 30) {
                         textDisplay.remove();
+                        synchronized (displaysAtLocationFinal) {
+                            displaysAtLocationFinal.remove(textDisplay);
+                        }
                         cancel();
                         return;
                     }
@@ -157,5 +186,14 @@ public class EntityDamageListener implements Listener {
             }
             activeTextDisplays.clear();
         }
+
+        // Clear all location-based text displays
+        locationTextDisplays.values().forEach(displays -> {
+            synchronized (displays) {
+                displays.forEach(Entity::remove);
+                displays.clear();
+            }
+        });
+        locationTextDisplays.clear();
     }
 }
