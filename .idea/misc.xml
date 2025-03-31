@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ExternalStorageConfigurationManager" enabled="true" />
+  <component name="MavenProjectsManager">
+    <option name="originalFiles">
+      <list>
+        <option value="$PROJECT_DIR$/src/main/java/com/gmail/bobason01/nms/v1_19_R3/pom.xml" />
+        <option value="$PROJECT_DIR$/DamageDisplay-1_19_4/pom.xml" />
+        <option value="$PROJECT_DIR$/src/com/gmail/bobason01/nms.v1_20_R1/pom.xml" />
+        <option value="$PROJECT_DIR$/src/com/gmail/bobason01/nms.v1_20_R2/pom.xml" />
+        <option value="$PROJECT_DIR$/pom.xml" />
+      </list>
+    </option>
+    <option name="ignoredFiles">
+      <set>
+        <option value="$PROJECT_DIR$/1_16_R1/pom.xml" />
+        <option value="$PROJECT_DIR$/1_16_R2/pom.xml" />
+        <option value="$PROJECT_DIR$/1_16_R3/pom.xml" />
+        <option value="$PROJECT_DIR$/1_17_1_R1/pom.xml" />
+        <option value="$PROJECT_DIR$/1_17_R1/pom.xml" />
+        <option value="$PROJECT_DIR$/1_18_R1/pom.xml" />
+        <option value="$PROJECT_DIR$/DamageDisplay-1_19_4/pom.xml" />
+        <option value="$PROJECT_DIR$/DamageDisplay-1_20_1/pom.xml" />
+        <option value="$PROJECT_DIR$/src/com/gmail/bobason01/nms.v1_20_R1/pom.xml" />
+        <option value="$PROJECT_DIR$/src/com/gmail/bobason01/nms.v1_20_R2/pom.xml" />
+      </set>
+    </option>
+  </component>
+  <component name="ProjectRootManager" version="2" languageLevel="JDK_X" default="true" project-jdk-name="23" project-jdk-type="JavaSDK">
+    <output url="file://$PROJECT_DIR$/out" />
+  </component>
+</project>

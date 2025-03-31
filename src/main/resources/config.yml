@@ -1,0 +1,4 @@
+blacklist:
+  - TEXT_DISPLAY
+  - ARMOR_STAND
+  - PLAYER

@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="DamageDisplay:jar">
+    <output-path>$PROJECT_DIR$/out/artifacts/DamageDisplay_jar</output-path>
+    <root id="archive" name="DamageDisplay.jar">
+      <element id="module-output" name="DamageDisplay" />
+    </root>
+  </artifact>
+</component>
