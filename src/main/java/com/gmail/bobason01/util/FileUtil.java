@@ -1,8 +1,9 @@
-package com.gmail.bobason01;
+package com.gmail.bobason01.util;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -13,9 +14,9 @@ public class FileUtil {
     public static void writeJson(File file, String jsonContent) {
         CompletableFuture.runAsync(() -> {
             try (FileOutputStream fos = new FileOutputStream(file)) {
-                fos.write(jsonContent.getBytes());
+                fos.write(jsonContent.getBytes(StandardCharsets.UTF_8));
             } catch (IOException e) {
-                LOGGER.log(Level.SEVERE, "JSON 파일 쓰기 오류", e);
+                LOGGER.log(Level.SEVERE, "Failed to write JSON file: " + file.getName(), e);
             }
         });
     }

@@ -2,6 +2,11 @@
 <project version="4">
   <component name="RemoteRepositoriesConfiguration">
     <remote-repository>
+      <option name="id" value="papermc" />
+      <option name="name" value="papermc" />
+      <option name="url" value="https://repo.papermc.io/repository/maven-snapshots/" />
+    </remote-repository>
+    <remote-repository>
       <option name="id" value="sonatype" />
       <option name="name" value="Sonatype OSS Snapshots" />
       <option name="url" value="https://oss.sonatype.org/content/repositories/snapshots" />
@@ -15,6 +20,16 @@
       <option name="id" value="local-repo" />
       <option name="name" value="local-repo" />
       <option name="url" value="file://C:\Users\bobas/.m2/repository" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="central" />
+      <option name="name" value="Maven Central repository" />
+      <option name="url" value="https://repo1.maven.org/maven2" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="papermc" />
+      <option name="name" value="papermc" />
+      <option name="url" value="https://repo.papermc.io/repository/maven-public/" />
     </remote-repository>
     <remote-repository>
       <option name="id" value="spigot-repo" />
@@ -37,19 +52,14 @@
       <option name="url" value="https://papermc.io/repo/repository/maven-public/" />
     </remote-repository>
     <remote-repository>
-      <option name="id" value="central" />
-      <option name="name" value="Maven Central repository" />
-      <option name="url" value="https://repo1.maven.org/maven2" />
-    </remote-repository>
-    <remote-repository>
       <option name="id" value="jboss.community" />
       <option name="name" value="JBoss Community repository" />
       <option name="url" value="https://repository.jboss.org/nexus/content/repositories/public/" />
     </remote-repository>
     <remote-repository>
-      <option name="id" value="papermc" />
-      <option name="name" value="papermc" />
-      <option name="url" value="https://repo.papermc.io/repository/maven-public/" />
+      <option name="id" value="lumine" />
+      <option name="name" value="lumine" />
+      <option name="url" value="https://mvn.lumine.io/repository/maven-public/" />
     </remote-repository>
     <remote-repository>
       <option name="id" value="nexus" />

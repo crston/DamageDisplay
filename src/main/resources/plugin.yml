@@ -1,19 +1,15 @@
 name: DamageDisplay
+version: 1.0.0
 main: com.gmail.bobason01.DamageDisplay
-version: 1.0
+api-version: 1.19
 author: crston
-api-version: 1.21
-description: Custom Font Damage Indicator
-depend:
-  - MythicMobs
 commands:
-  setdamageskin:
-    description: Changes the damage skin
-    usage: /setdamageskin <number>
-  damagereload:
-    description: Reloads the plugin configuration
-    usage: /damagereload
+  damagedisplay:
+    description: Main command for DamageDisplay
+    usage: /<command> <reload|set|blacklist>
+    aliases: [dd]
+    permission: damagedisplay.use
 permissions:
-  damagedisplay.reload:
-    description: Reload the plugin configuration
+  damagedisplay.skin.*:
+    description: All skins
     default: op

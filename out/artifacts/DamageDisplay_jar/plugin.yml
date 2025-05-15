@@ -2,11 +2,10 @@ name: DamageDisplay
 main: com.gmail.bobason01.DamageDisplay
 version: 1.0
 author: crston
-api-version: 1.21
+api-version: 1.19
 description: Custom Font Damage Indicator
 depend:
   - MythicMobs
-  - ProtocolLib
 commands:
   setdamageskin:
     description: Changes the damage skin

@@ -28,10 +28,26 @@
       <module name="1_21_R1" target="22" />
       <module name="1_21_R2" target="22" />
       <module name="1_21_R3" target="22" />
+      <module name="core" target="1.8" />
       <module name="DamageDisplay (1)" target="1.8" />
       <module name="DamageDisplay-1_19_4" target="17" />
       <module name="DamageDisplay-1_20_1" target="17" />
+      <module name="impl-v1_16_R2" target="1.8" />
+      <module name="impl-v1_16_R3" target="1.8" />
+      <module name="impl-v1_17_R1" target="1.8" />
+      <module name="impl-v1_18_R1" target="1.8" />
+      <module name="impl-v1_18_R2" target="1.8" />
+      <module name="impl-v1_19_R1" target="1.8" />
+      <module name="impl-v1_19_R2" target="1.8" />
+      <module name="impl-v1_19_R3" target="1.8" />
+      <module name="impl-v1_20_R1" target="1.8" />
+      <module name="impl-v1_20_R2" target="1.8" />
+      <module name="impl-v1_20_R3" target="1.8" />
+      <module name="impl-v1_21_R1" target="1.8" />
+      <module name="impl-v1_21_R2" target="1.8" />
+      <module name="impl-v1_21_R3" target="1.8" />
       <module name="nms.v1_20_R1" target="1.8" />
+      <module name="plugin" target="1.8" />
     </bytecodeTargetLevel>
   </component>
 </project>

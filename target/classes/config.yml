@@ -1,3 +1,8 @@
+
+# armor_stand or text_display
+display:
+  type: text_display
+
 blacklist:
   - TEXT_DISPLAY
   - ARMOR_STAND

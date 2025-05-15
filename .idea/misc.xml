@@ -21,12 +21,28 @@
         <option value="$PROJECT_DIR$/1_18_R1/pom.xml" />
         <option value="$PROJECT_DIR$/DamageDisplay-1_19_4/pom.xml" />
         <option value="$PROJECT_DIR$/DamageDisplay-1_20_1/pom.xml" />
+        <option value="$PROJECT_DIR$/core/pom.xml" />
+        <option value="$PROJECT_DIR$/impl-v1_16_R2/pom.xml" />
+        <option value="$PROJECT_DIR$/impl-v1_16_R3/pom.xml" />
+        <option value="$PROJECT_DIR$/impl-v1_17_R1/pom.xml" />
+        <option value="$PROJECT_DIR$/impl-v1_18_R1/pom.xml" />
+        <option value="$PROJECT_DIR$/impl-v1_18_R2/pom.xml" />
+        <option value="$PROJECT_DIR$/impl-v1_19_R1/pom.xml" />
+        <option value="$PROJECT_DIR$/impl-v1_19_R2/pom.xml" />
+        <option value="$PROJECT_DIR$/impl-v1_19_R3/pom.xml" />
+        <option value="$PROJECT_DIR$/impl-v1_20_R1/pom.xml" />
+        <option value="$PROJECT_DIR$/impl-v1_20_R2/pom.xml" />
+        <option value="$PROJECT_DIR$/impl-v1_20_R3/pom.xml" />
+        <option value="$PROJECT_DIR$/impl-v1_21_R1/pom.xml" />
+        <option value="$PROJECT_DIR$/impl-v1_21_R2/pom.xml" />
+        <option value="$PROJECT_DIR$/impl-v1_21_R3/pom.xml" />
+        <option value="$PROJECT_DIR$/plugin/pom.xml" />
         <option value="$PROJECT_DIR$/src/com/gmail/bobason01/nms.v1_20_R1/pom.xml" />
         <option value="$PROJECT_DIR$/src/com/gmail/bobason01/nms.v1_20_R2/pom.xml" />
       </set>
     </option>
   </component>
-  <component name="ProjectRootManager" version="2" languageLevel="JDK_X" default="true" project-jdk-name="23" project-jdk-type="JavaSDK">
+  <component name="ProjectRootManager" version="2" languageLevel="JDK_17" default="true" project-jdk-name="ms-17" project-jdk-type="JavaSDK">
     <output url="file://$PROJECT_DIR$/out" />
   </component>
 </project>
