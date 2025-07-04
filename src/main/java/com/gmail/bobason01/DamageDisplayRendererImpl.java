@@ -6,9 +6,7 @@ import io.lumine.mythic.api.skills.SkillCaster;
 import io.lumine.mythic.bukkit.BukkitAdapter;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
-import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.World;
+import org.bukkit.*;
 import org.bukkit.entity.*;
 import org.bukkit.persistence.PersistentDataType;
 
@@ -19,92 +17,84 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 public class DamageDisplayRendererImpl implements DamageDisplayRenderer {
     private final DamageDisplay plugin;
     private final String type;
-    private final boolean supportsTextDisplay;
-    private final org.bukkit.NamespacedKey tagKey;
-    private final Map<Long, Integer> heightMap = new HashMap<>();
-    private final Queue<TextDisplay> textDisplayPool = new ConcurrentLinkedQueue<>();
-    private final Queue<ArmorStand> armorStandPool = new ConcurrentLinkedQueue<>();
+    private final boolean useTextDisplay;
+    private final NamespacedKey tagKey;
+    private final Map<Long, Integer> heightOffsets = new HashMap<>();
+    private final Queue<TextDisplay> textPool = new ConcurrentLinkedQueue<>();
+    private final Queue<ArmorStand> armorPool = new ConcurrentLinkedQueue<>();
     private final Map<UUID, CachedAura> auraCache = new ConcurrentHashMap<>();
 
     public DamageDisplayRendererImpl(DamageDisplay plugin) {
         this.plugin = plugin;
         this.type = plugin.getConfig().getString("display.type", "text_display").toLowerCase();
-        this.supportsTextDisplay = isTextDisplaySupported();
-        this.tagKey = new org.bukkit.NamespacedKey(plugin, "display_entity");
+        this.useTextDisplay = isTextDisplaySupported();
+        this.tagKey = new NamespacedKey(plugin, "display_entity");
     }
 
     @Override
-    public void display(Location location, int damage, boolean isCritical, int skinIndex) {
-        if (getTPS() < 17.0) return;
+    public void display(Location loc, int damage, boolean isCritical, int skinIndex) {
+        if (getTPS() < 17.0 || damage <= 0) return;
 
-        Location stacked = getStackedLocation(location);
-        if ("text_display".equals(type) && supportsTextDisplay) {
-            spawnTextDisplay(stacked, damage, isCritical, skinIndex);
+        Location stacked = getOffsetLocation(loc);
+        if ("text_display".equals(type) && useTextDisplay) {
+            showTextDisplay(stacked, damage, isCritical, skinIndex);
         } else {
-            spawnArmorStand(stacked, damage, isCritical, skinIndex);
+            showArmorStand(stacked, damage, isCritical, skinIndex);
         }
     }
 
     public CachedAura getAuraData(Entity damager) {
-        if (!(damager instanceof LivingEntity)) return new CachedAura(false, 0);
-        UUID uuid = damager.getUniqueId();
-        CachedAura cached = auraCache.get(uuid);
+        if (!(damager instanceof LivingEntity le)) return new CachedAura(false, 0);
+        UUID id = le.getUniqueId();
+        CachedAura cached = auraCache.get(id);
         long now = System.currentTimeMillis();
         if (cached != null && now - cached.timestamp < 1000) return cached;
 
         boolean critical = false;
-        int index = 0;
+        int skin = 0;
 
         try {
-            SkillCaster caster = MythicProvider.get().getSkillManager().getCaster(BukkitAdapter.adapt(damager));
+            SkillCaster caster = MythicProvider.get().getSkillManager().getCaster(BukkitAdapter.adapt(le));
             if (caster != null) {
                 critical = caster.hasAura("critical");
                 for (int i = 0; i <= plugin.getMaxSkinIndex(); i++) {
                     if (caster.hasAura("damageskin" + i)) {
-                        index = i;
+                        skin = i;
                         break;
                     }
                 }
             }
-            if (damager instanceof Player p) {
-                index = plugin.getPlayerSkin(p.getUniqueId());
-            }
+            if (le instanceof Player p) skin = plugin.getPlayerSkin(p.getUniqueId());
         } catch (Exception ignored) {}
 
-        CachedAura aura = new CachedAura(critical, index, now);
-        auraCache.put(uuid, aura);
+        CachedAura aura = new CachedAura(critical, skin, now);
+        auraCache.put(id, aura);
         return aura;
     }
 
     private boolean isTextDisplaySupported() {
-        String version = Bukkit.getBukkitVersion();
-        return version.startsWith("1.19") || version.startsWith("1.20") || version.startsWith("1.21");
+        String v = Bukkit.getBukkitVersion();
+        return v.startsWith("1.19") || v.startsWith("1.20") || v.startsWith("1.21");
     }
 
-    private Component buildTextComponent(int damage, boolean isCritical, int skinIndex) {
-        String path = (isCritical ? "critical" : "normal") + skinIndex;
+    private Component buildComponent(int damage, boolean critical, int skin) {
+        String font = (critical ? "critical" : "normal") + skin;
+        if (!font.matches("[a-z0-9_./\\-]+")) font = "normal0";
+        Key key = Key.key("damagedisplay", font);
 
-        if (path.isBlank() || !path.matches("[a-z0-9_./\\-]+")) {
-            plugin.getLogger().warning("Invalid font key: " + path + ", using fallback normal0");
-            path = "normal0";
-        }
-
-        Key fontKey = Key.key("damagedisplay", path);
         Component comp = Component.empty();
-
         for (char c : Integer.toString(damage).toCharArray()) {
-            comp = comp.append(Component.text(String.valueOf(c)).font(fontKey));
+            comp = comp.append(Component.text(String.valueOf(c)).font(key));
         }
-
         return comp;
     }
 
-    private void spawnTextDisplay(Location loc, int damage, boolean isCritical, int skinIndex) {
+    private void showTextDisplay(Location loc, int damage, boolean critical, int skin) {
         World world = loc.getWorld();
         if (world == null) return;
-        clearOverlappingDisplays(loc);
+        removeNearbyDisplays(loc);
 
-        TextDisplay display = textDisplayPool.poll();
+        TextDisplay display = textPool.poll();
         if (display == null || display.isDead()) {
             display = (TextDisplay) world.spawnEntity(loc, EntityType.TEXT_DISPLAY);
         } else {
@@ -115,23 +105,23 @@ public class DamageDisplayRendererImpl implements DamageDisplayRenderer {
         display.setShadowed(false);
         display.setSeeThrough(true);
         display.setPersistent(false);
-        display.setBackgroundColor(org.bukkit.Color.fromARGB(0, 0, 0, 0));
-        display.text(buildTextComponent(damage, isCritical, skinIndex));
+        display.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
+        display.text(buildComponent(damage, critical, skin));
         display.getPersistentDataContainer().set(tagKey, PersistentDataType.INTEGER, 1);
 
         TextDisplay finalDisplay = display;
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             finalDisplay.remove();
-            textDisplayPool.offer(finalDisplay);
+            textPool.offer(finalDisplay);
         }, 20L);
     }
 
-    private void spawnArmorStand(Location loc, int damage, boolean isCritical, int skinIndex) {
+    private void showArmorStand(Location loc, int damage, boolean critical, int skin) {
         World world = loc.getWorld();
         if (world == null) return;
-        clearOverlappingDisplays(loc);
+        removeNearbyDisplays(loc);
 
-        ArmorStand stand = armorStandPool.poll();
+        ArmorStand stand = armorPool.poll();
         if (stand == null || stand.isDead()) {
             stand = (ArmorStand) world.spawnEntity(loc, EntityType.ARMOR_STAND);
         } else {
@@ -143,21 +133,21 @@ public class DamageDisplayRendererImpl implements DamageDisplayRenderer {
         stand.setSmall(true);
         stand.setMarker(true);
         stand.setCustomNameVisible(true);
-        stand.customName(buildTextComponent(damage, isCritical, skinIndex));
+        stand.customName(buildComponent(damage, critical, skin));
         stand.getPersistentDataContainer().set(tagKey, PersistentDataType.INTEGER, 1);
 
         ArmorStand finalStand = stand;
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             finalStand.remove();
-            armorStandPool.offer(finalStand);
+            armorPool.offer(finalStand);
         }, 20L);
     }
 
-    private void clearOverlappingDisplays(Location loc) {
+    private void removeNearbyDisplays(Location loc) {
         World world = loc.getWorld();
         if (world == null) return;
-        double radius = 0.4;
-        for (Entity e : world.getNearbyEntities(loc, radius, radius, radius)) {
+        double r = 0.4;
+        for (Entity e : world.getNearbyEntities(loc, r, r, r)) {
             if ((e instanceof TextDisplay || e instanceof ArmorStand) && !e.isDead() &&
                     e.getPersistentDataContainer().has(tagKey, PersistentDataType.INTEGER)) {
                 e.remove();
@@ -171,27 +161,27 @@ public class DamageDisplayRendererImpl implements DamageDisplayRenderer {
                 ((long) loc.getBlockZ() & 0xFFFFFL);
     }
 
-    private Location getStackedLocation(Location base) {
+    private Location getOffsetLocation(Location base) {
         long key = toKey(base);
-        int offset = heightMap.getOrDefault(key, 0);
-        heightMap.put(key, (offset + 1) % 5);
+        int offset = heightOffsets.getOrDefault(key, 0);
+        heightOffsets.put(key, (offset + 1) % 5);
         return base.clone().add(0, offset, 0);
     }
 
     private double getTPS() {
         try {
             return Bukkit.getServer().getTPS()[0];
-        } catch (NoSuchMethodError | Exception e) {
+        } catch (Throwable ignored) {
             return 20.0;
         }
     }
 
     @Override
     public void removeAll() {
-        textDisplayPool.forEach(Entity::remove);
-        armorStandPool.forEach(Entity::remove);
-        textDisplayPool.clear();
-        armorStandPool.clear();
+        textPool.forEach(Entity::remove);
+        armorPool.forEach(Entity::remove);
+        textPool.clear();
+        armorPool.clear();
         auraCache.clear();
     }
 

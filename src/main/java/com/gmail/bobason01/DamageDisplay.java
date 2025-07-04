@@ -17,7 +17,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 
@@ -31,16 +32,16 @@ public class DamageDisplay extends JavaPlugin implements Listener {
         saveDefaultConfig();
         new ResourceFileCreator(getDataFolder()).createResourceFiles();
 
-        this.blacklistManager = new BlacklistManager(this, getDataFolder());
-        this.renderer = new DamageDisplayRendererImpl(this);
+        blacklistManager = new BlacklistManager(this, getDataFolder());
+        renderer = new DamageDisplayRendererImpl(this);
 
-        getServer().getPluginManager().registerEvents(new EntityDamageListener(this, renderer), this);
-        getServer().getPluginManager().registerEvents(this, this);
+        Bukkit.getPluginManager().registerEvents(new EntityDamageListener(this, renderer), this);
+        Bukkit.getPluginManager().registerEvents(this, this);
 
-        new DamageDisplayCommand(this); // 명령어 통합 처리
+        new DamageDisplayCommand(this);
         new BugReportCommand(this);
 
-        getLogger().info("DamageDisplay plugin enabled with renderer: " + renderer.getClass().getSimpleName());
+        getLogger().info("DamageDisplay enabled with renderer: " + renderer.getClass().getSimpleName());
     }
 
     @Override
@@ -53,12 +54,12 @@ public class DamageDisplay extends JavaPlugin implements Listener {
     public void onPlayerJoin(PlayerJoinEvent event) {
         UUID uuid = event.getPlayer().getUniqueId();
         File file = getPlayerFile(uuid);
+
         if (!file.exists()) {
             saveSkin(uuid, 0);
         } else {
             FileConfiguration config = YamlConfiguration.loadConfiguration(file);
-            int skin = config.getInt("damage-skin", 0);
-            playerSkins.put(uuid, skin);
+            playerSkins.put(uuid, config.getInt("damage-skin", 0));
         }
     }
 
@@ -92,7 +93,7 @@ public class DamageDisplay extends JavaPlugin implements Listener {
             for (File file : files) {
                 try {
                     int index = Integer.parseInt(file.getName().replaceAll("\\D+", ""));
-                    max = Math.max(max, index);
+                    if (index > max) max = index;
                 } catch (NumberFormatException ignored) {}
             }
         }

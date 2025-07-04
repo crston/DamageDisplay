@@ -7,6 +7,7 @@ import org.bukkit.Location;
 import org.bukkit.entity.Damageable;
 import org.bukkit.entity.Entity;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 
@@ -19,14 +20,14 @@ public class EntityDamageListener implements Listener {
         this.renderer = (DamageDisplayRendererImpl) renderer;
     }
 
-    @EventHandler
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onEntityDamage(EntityDamageByEntityEvent event) {
         Entity target = event.getEntity();
         if (!(target instanceof Damageable)) return;
         if (plugin.isEntityBlacklisted(target.getType())) return;
 
         double damage = event.getFinalDamage();
-        if (damage <= 0) return;
+        if (damage <= 0 || event.isCancelled()) return;
 
         Entity damager = event.getDamager();
         Location displayLocation = target.getLocation().add(0, 2, 0);
