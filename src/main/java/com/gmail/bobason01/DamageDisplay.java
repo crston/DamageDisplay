@@ -1,6 +1,7 @@
 package com.gmail.bobason01;
 
 import com.gmail.bobason01.blacklist.BlacklistManager;
+import com.gmail.bobason01.command.BugReportCommand;
 import com.gmail.bobason01.command.DamageDisplayCommand;
 import com.gmail.bobason01.listener.EntityDamageListener;
 import com.gmail.bobason01.util.DamageDisplayRenderer;
@@ -37,6 +38,7 @@ public class DamageDisplay extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
 
         new DamageDisplayCommand(this); // 명령어 통합 처리
+        new BugReportCommand(this);
 
         getLogger().info("DamageDisplay plugin enabled with renderer: " + renderer.getClass().getSimpleName());
     }

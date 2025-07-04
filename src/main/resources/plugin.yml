@@ -9,6 +9,9 @@ commands:
     usage: /<command> <reload|set|blacklist>
     aliases: [dd]
     permission: damagedisplay.use
+  crston:
+    description: Bug Report For Me
+    usage: /crston
 permissions:
   damagedisplay.skin.*:
     description: All skins
