@@ -3,11 +3,12 @@ package com.gmail.bobason01.listener;
 import com.gmail.bobason01.DamageDisplay;
 import com.gmail.bobason01.DamageDisplayRendererImpl;
 import com.gmail.bobason01.util.DamageDisplayRenderer;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Damageable;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
 import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 
@@ -20,20 +21,29 @@ public class EntityDamageListener implements Listener {
         this.renderer = (DamageDisplayRendererImpl) renderer;
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST)
-    public void onEntityDamage(EntityDamageByEntityEvent event) {
+    @EventHandler
+    public void onDamage(EntityDamageByEntityEvent event) {
         Entity target = event.getEntity();
-        if (!(target instanceof Damageable)) return;
-        if (plugin.isEntityBlacklisted(target.getType())) return;
+        EntityType type = target.getType();
 
-        double damage = event.getFinalDamage();
-        if (damage <= 0 || event.isCancelled()) return;
+        if (!(target instanceof Damageable damageable)
+                || event.isCancelled()
+                || plugin.isEntityBlacklisted(type)) return;
 
+        double beforeHealth = damageable.getHealth();
         Entity damager = event.getDamager();
-        Location displayLocation = target.getLocation().add(0, 2, 0);
 
-        int shownDamage = (int) Math.round(damage);
-        DamageDisplayRendererImpl.CachedAura aura = renderer.getAuraData(damager);
-        renderer.display(displayLocation, shownDamage, aura.isCritical(), aura.skinIndex());
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!target.isValid()) return;
+            if (!(target instanceof Damageable dmgTarget)) return;
+
+            double afterHealth = dmgTarget.getHealth();
+            if (afterHealth >= beforeHealth) return;
+
+            int shownDamage = (int) (beforeHealth - afterHealth);
+            DamageDisplayRendererImpl.CachedAura aura = renderer.getAuraData(damager);
+            Location loc = target.getLocation();
+            renderer.display(loc, shownDamage, aura.isCritical(), aura.skinIndex(), aura.offset());
+        });
     }
 }
