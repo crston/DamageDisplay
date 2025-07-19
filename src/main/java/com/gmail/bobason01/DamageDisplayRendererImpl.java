@@ -1,4 +1,3 @@
-// --- DamageDisplayRendererImpl.java ---
 package com.gmail.bobason01;
 
 import com.gmail.bobason01.util.DamageDisplayRenderer;
@@ -20,35 +19,30 @@ public class DamageDisplayRendererImpl implements DamageDisplayRenderer {
     private final String type;
     private final boolean useTextDisplay;
     private final NamespacedKey tagKey;
-    private final Set<Long> activeDisplayLocations = ConcurrentHashMap.newKeySet();
     private final Queue<TextDisplay> textPool = new ConcurrentLinkedQueue<>();
     private final Queue<ArmorStand> armorPool = new ConcurrentLinkedQueue<>();
     private final Map<UUID, CachedAura> auraCache = new ConcurrentHashMap<>();
     private final Map<String, Key> fontKeyCache = new ConcurrentHashMap<>();
-
-    private volatile double cachedTps = 20.0;
-    private static final int LOC_MASK = 0xFFFFF;
 
     public DamageDisplayRendererImpl(DamageDisplay plugin) {
         this.plugin = plugin;
         this.type = plugin.getConfig().getString("display.type", "text_display").toLowerCase();
         this.useTextDisplay = isTextDisplaySupported();
         this.tagKey = new NamespacedKey(plugin, "display_entity");
-        startTpsMonitor();
     }
 
     @Override
     public void display(Location loc, int damage, boolean isCritical, int skinIndex, double[] offset) {
-        if (damage <= 0 || cachedTps < 17.0) return;
+        if (damage <= 0) return;
 
         Location displayLoc = loc.clone().add(offset[0], offset[1], offset[2]);
-        long key = toKey(displayLoc);
-        if (!activeDisplayLocations.add(key)) return;
+
+        removeNearbyDisplays(displayLoc, 1.5);
 
         if (useTextDisplay) {
-            showTextDisplay(displayLoc, damage, isCritical, skinIndex, key);
+            showTextDisplay(displayLoc, damage, isCritical, skinIndex);
         } else {
-            showArmorStand(displayLoc, damage, isCritical, skinIndex, key);
+            showArmorStand(displayLoc, damage, isCritical, skinIndex);
         }
     }
 
@@ -92,7 +86,6 @@ public class DamageDisplayRendererImpl implements DamageDisplayRenderer {
 
             BoundingBox box = le.getBoundingBox();
             offset[1] = Math.max(offset[1], Math.min(box.getHeight() + 0.2, 4.0));
-
         } catch (Exception ignored) {}
 
         CachedAura result = new CachedAura(critical, skin, offset, now);
@@ -118,7 +111,7 @@ public class DamageDisplayRendererImpl implements DamageDisplayRenderer {
         return comp;
     }
 
-    private void showTextDisplay(Location loc, int damage, boolean critical, int skin, long key) {
+    private void showTextDisplay(Location loc, int damage, boolean critical, int skin) {
         World world = loc.getWorld();
         if (world == null) return;
 
@@ -141,11 +134,10 @@ public class DamageDisplayRendererImpl implements DamageDisplayRenderer {
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             finalDisplay.remove();
             textPool.offer(finalDisplay);
-            activeDisplayLocations.remove(key);
         }, 20L);
     }
 
-    private void showArmorStand(Location loc, int damage, boolean critical, int skin, long key) {
+    private void showArmorStand(Location loc, int damage, boolean critical, int skin) {
         World world = loc.getWorld();
         if (world == null) return;
 
@@ -168,24 +160,19 @@ public class DamageDisplayRendererImpl implements DamageDisplayRenderer {
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
             finalStand.remove();
             armorPool.offer(finalStand);
-            activeDisplayLocations.remove(key);
         }, 20L);
     }
 
-    private long toKey(Location loc) {
-        return ((long)(loc.getBlockX() & LOC_MASK) << 40) |
-                ((long)(loc.getBlockY() & LOC_MASK) << 20) |
-                (loc.getBlockZ() & LOC_MASK);
-    }
+    private void removeNearbyDisplays(Location loc, double radius) {
+        World world = loc.getWorld();
+        if (world == null) return;
 
-    private void startTpsMonitor() {
-        Bukkit.getScheduler().runTaskTimer(plugin, () -> {
-            try {
-                cachedTps = Bukkit.getServer().getTPS()[0];
-            } catch (Throwable ignored) {
-                cachedTps = 20.0;
+        Collection<Entity> nearby = world.getNearbyEntities(loc, radius, radius, radius);
+        for (Entity e : nearby) {
+            if (e.getPersistentDataContainer().has(tagKey, PersistentDataType.INTEGER)) {
+                e.remove();
             }
-        }, 0L, 20L);
+        }
     }
 
     @Override
@@ -195,10 +182,9 @@ public class DamageDisplayRendererImpl implements DamageDisplayRenderer {
         textPool.clear();
         armorPool.clear();
         auraCache.clear();
-        activeDisplayLocations.clear();
     }
 
     public record CachedAura(boolean isCritical, int skinIndex, double[] offset, long timestamp) {
-        public static final CachedAura DEFAULT = new CachedAura(false, 0, new double[] {0, 2.0, 0}, System.currentTimeMillis());
+        public static final CachedAura DEFAULT = new CachedAura(false, 0, new double[]{0, 2.0, 0}, System.currentTimeMillis());
     }
 }

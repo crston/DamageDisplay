@@ -7,7 +7,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.entity.Damageable;
 import org.bukkit.entity.Entity;
-import org.bukkit.entity.EntityType;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -24,25 +23,21 @@ public class EntityDamageListener implements Listener {
     @EventHandler
     public void onDamage(EntityDamageByEntityEvent event) {
         Entity target = event.getEntity();
-        EntityType type = target.getType();
-
-        if (!(target instanceof Damageable damageable)
-                || event.isCancelled()
-                || plugin.isEntityBlacklisted(type)) return;
-
-        double beforeHealth = damageable.getHealth();
         Entity damager = event.getDamager();
 
+        if (!(target instanceof Damageable)
+                || event.isCancelled()
+                || plugin.isEntityBlacklisted(target.getType())) return;
+
+        double finalDamage = event.getFinalDamage();
+        if (finalDamage <= 0) return;
+
+        int shownDamage = (int) Math.round(finalDamage);
+
         Bukkit.getScheduler().runTask(plugin, () -> {
-            if (!target.isValid()) return;
-            if (!(target instanceof Damageable dmgTarget)) return;
-
-            double afterHealth = dmgTarget.getHealth();
-            if (afterHealth >= beforeHealth) return;
-
-            int shownDamage = (int) (beforeHealth - afterHealth);
-            DamageDisplayRendererImpl.CachedAura aura = renderer.getAuraData(damager);
             Location loc = target.getLocation();
+            DamageDisplayRendererImpl.CachedAura aura = renderer.getAuraData(damager);
+
             renderer.display(loc, shownDamage, aura.isCritical(), aura.skinIndex(), aura.offset());
         });
     }
