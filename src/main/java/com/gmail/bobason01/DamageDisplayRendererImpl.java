@@ -9,6 +9,7 @@ import net.kyori.adventure.text.Component;
 import org.bukkit.*;
 import org.bukkit.entity.*;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.BoundingBox;
 
 import java.util.*;
@@ -36,8 +37,6 @@ public class DamageDisplayRendererImpl implements DamageDisplayRenderer {
         if (damage <= 0) return;
 
         Location displayLoc = loc.clone().add(offset[0], offset[1], offset[2]);
-
-        removeNearbyDisplays(displayLoc, 1.5);
 
         if (useTextDisplay) {
             showTextDisplay(displayLoc, damage, isCritical, skinIndex);
@@ -130,11 +129,35 @@ public class DamageDisplayRendererImpl implements DamageDisplayRenderer {
         display.text(buildComponent(damage, critical, skin));
         display.getPersistentDataContainer().set(tagKey, PersistentDataType.INTEGER, 1);
 
-        TextDisplay finalDisplay = display;
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            finalDisplay.remove();
-            textPool.offer(finalDisplay);
-        }, 20L);
+        animateDisplay(display);
+    }
+
+    private void animateDisplay(TextDisplay display) {
+        Location origin = display.getLocation().clone();
+        double gravity = 0.035;
+        double velocity = 0.17;
+
+        new BukkitRunnable() {
+            double t = 0;
+            double y = 0;
+            double vy = velocity;
+
+            @Override
+            public void run() {
+                y += vy;
+                vy -= gravity;
+                t++;
+
+                Location newLoc = origin.clone().add(0, y, 0);
+                display.teleport(newLoc);
+
+                if (vy < -0.15 || t > 15) { // 충분히 떨어지면 바로 제거
+                    display.remove();
+                    textPool.offer(display);
+                    cancel();
+                }
+            }
+        }.runTaskTimer(plugin, 0L, 1L);
     }
 
     private void showArmorStand(Location loc, int damage, boolean critical, int skin) {
@@ -161,18 +184,6 @@ public class DamageDisplayRendererImpl implements DamageDisplayRenderer {
             finalStand.remove();
             armorPool.offer(finalStand);
         }, 20L);
-    }
-
-    private void removeNearbyDisplays(Location loc, double radius) {
-        World world = loc.getWorld();
-        if (world == null) return;
-
-        Collection<Entity> nearby = world.getNearbyEntities(loc, radius, radius, radius);
-        for (Entity e : nearby) {
-            if (e.getPersistentDataContainer().has(tagKey, PersistentDataType.INTEGER)) {
-                e.remove();
-            }
-        }
     }
 
     @Override
