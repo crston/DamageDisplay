@@ -23,7 +23,7 @@ public class DamageDisplayCommand implements TabExecutor {
     }
 
     @Override
-    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
+    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String @NotNull [] args) {
         if (args.length == 0) {
             sender.sendMessage("Usage: /damagedisplay <reload|set|blacklist>");
             return true;
@@ -132,7 +132,7 @@ public class DamageDisplayCommand implements TabExecutor {
     }
 
     @Override
-    public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
+    public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String @NotNull [] args) {
         if (args.length == 1) {
             return Arrays.asList("reload", "set", "blacklist");
         }

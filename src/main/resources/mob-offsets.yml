@@ -1,0 +1,8 @@
+# Define custom damage indicator offsets for specific MythicMobs.
+# The key is the MythicMob's internal ID (e.g., SkeletonKing).
+# y-value is relative to the entity's location (0 is at its feet).
+
+SkeletonKing:
+  x: 0.0
+  y: 3.5
+  z: 0.0

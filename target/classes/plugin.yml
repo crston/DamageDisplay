@@ -3,16 +3,17 @@ version: 3.0
 main: com.gmail.bobason01.DamageDisplay
 api-version: 1.19
 author: crston
+depend: [MythicMobs, ProtocolLib]
 commands:
   damagedisplay:
-    description: Main command for DamageDisplay
-    usage: /<command> <reload|set|blacklist>
+    description: DamageDisplay a main command.
     aliases: [dd]
-    permission: damagedisplay.use
   crston:
-    description: Bug Report For Me
-    usage: /crston
+    description: Shows developer's discord id.
 permissions:
   damagedisplay.skin.*:
-    description: All skins
+    description: Allows access to all skins.
+    default: op
+  damagedisplay.blacklist:
+    description: Allows management of the entity blacklist.
     default: op
