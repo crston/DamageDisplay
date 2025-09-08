@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
@@ -14,8 +15,9 @@ public class ResourceFileCreator {
     private static final Logger LOGGER = Logger.getLogger(ResourceFileCreator.class.getName());
     private final File dataFolder;
 
-    private static final String CRITICAL_IMAGE_URL = "https://www.dropbox.com/scl/fi/kmxxb2d3gdhq3vglyoagl/critical0.png?dl=1";
-    private static final String NORMAL_IMAGE_URL = "https://www.dropbox.com/scl/fi/dpyg9yta6445lxi6hnpq5/normal0.png?dl=1";
+    // Direct download links using raw=1
+    private static final String CRITICAL_IMAGE_URL = "https://www.dropbox.com/scl/fi/kmxxb2d3gdhq3vglyoagl/critical0.png?raw=1";
+    private static final String NORMAL_IMAGE_URL = "https://www.dropbox.com/scl/fi/dpyg9yta6445lxi6hnpq5/normal0.png?raw=1";
 
     public ResourceFileCreator(File dataFolder) {
         this.dataFolder = dataFolder;
@@ -27,9 +29,10 @@ public class ResourceFileCreator {
         File imagesDir = new File(dataFolder, "images");
         File buildDir = new File(dataFolder, "build");
 
-        CompletableFuture.runAsync(() -> {
-            Stream.of(texturesDir, fontsDir, imagesDir, buildDir).forEach(this::createDir);
+        // Create the necessary directories upfront to ensure they exist before the async task
+        Stream.of(texturesDir, fontsDir, imagesDir, buildDir).forEach(this::createDir);
 
+        CompletableFuture.runAsync(() -> {
             try {
                 downloadImage(imagesDir, "critical0.png", CRITICAL_IMAGE_URL);
                 downloadImage(imagesDir, "normal0.png", NORMAL_IMAGE_URL);
@@ -39,7 +42,9 @@ public class ResourceFileCreator {
                 FontUtil.generateJsonFiles(fontsDir.getPath(), 0, maxIndex);
                 createPackMcmeta(buildDir);
             } catch (IOException e) {
-                LOGGER.log(Level.SEVERE, "Failed to create resource file", e);
+                LOGGER.log(Level.SEVERE, "Failed to create resource files", e);
+                // Wrap the checked exception in an unchecked one for CompletableFuture
+                throw new CompletionException("Resource creation failed", e);
             }
         }).exceptionally(ex -> {
             LOGGER.log(Level.SEVERE, "Asynchronous resource processing failed", ex);
@@ -55,8 +60,12 @@ public class ResourceFileCreator {
 
     private void downloadImage(File dir, String name, String url) throws IOException {
         File file = new File(dir, name);
-        if (file.exists()) return;
+        if (file.exists()) {
+            LOGGER.info("Image already exists: " + name);
+            return;
+        }
 
+        LOGGER.info("Starting image download: " + name);
         try (InputStream in = new URI(url).toURL().openStream();
              FileOutputStream out = new FileOutputStream(file)) {
 
@@ -65,11 +74,10 @@ public class ResourceFileCreator {
             while ((len = in.read(buf)) != -1) {
                 out.write(buf, 0, len);
             }
-
             LOGGER.info("Image download complete: " + name);
         } catch (Exception e) {
             LOGGER.log(Level.SEVERE, "Image download failed: " + name, e);
-            throw new IOException(e);
+            throw new IOException("Image download failed: " + name, e);
         }
     }
 

@@ -8,15 +8,12 @@ import com.gmail.bobason01.data.MySQLDataSource;
 import com.gmail.bobason01.data.SQLiteDataSource;
 import com.gmail.bobason01.data.YamlDataSource;
 import com.gmail.bobason01.listener.EntityDamageListener;
-import com.gmail.bobason01.util.DamageDisplayRenderer;
+import com.gmail.bobason01.listener.PlayerConnectionListener;
 import com.gmail.bobason01.util.ResourceFileCreator;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.EntityType;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.util.Vector;
 
@@ -25,26 +22,32 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class DamageDisplay extends JavaPlugin implements Listener {
+public class DamageDisplay extends JavaPlugin {
     private IDataSource dataSource;
     private BlacklistManager blacklistManager;
-    private DamageDisplayRenderer renderer;
+    // [개선] 타입을 Impl로 명확히 하여 형변환 문제 방지
+    private DamageDisplayRendererImpl renderer;
     private final Map<UUID, Integer> playerSkins = new ConcurrentHashMap<>();
     private final Map<String, Vector> mobOffsets = new ConcurrentHashMap<>();
+
+    // [핵심] maxSkinIndex 값을 캐싱할 변수
+    private int maxSkinIndex = 0;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
         loadMobOffsets();
         initDataSource();
+        updateMaxSkinIndex(); // [핵심] 서버 시작 시 스킨 인덱스 계산
 
         new ResourceFileCreator(getDataFolder()).createResourceFiles();
 
         blacklistManager = new BlacklistManager(this, getDataFolder());
         renderer = new DamageDisplayRendererImpl(this);
 
+        // [개선] 리스너 역할을 별도 클래스로 분리하여 등록
         Bukkit.getPluginManager().registerEvents(new EntityDamageListener(this, renderer), this);
-        Bukkit.getPluginManager().registerEvents(this, this);
+        Bukkit.getPluginManager().registerEvents(new PlayerConnectionListener(this), this);
 
         new DamageDisplayCommand(this);
         new BugReportCommand(this);
@@ -59,14 +62,11 @@ public class DamageDisplay extends JavaPlugin implements Listener {
         if (dataSource != null) dataSource.close();
     }
 
-    @EventHandler
-    public void onPlayerJoin(PlayerJoinEvent event) {
-        UUID uuid = event.getPlayer().getUniqueId();
-        dataSource.loadPlayerSkin(uuid).thenAcceptAsync(skinIndex -> playerSkins.put(uuid, skinIndex), runnable -> Bukkit.getScheduler().runTask(this, runnable));
-    }
+    // PlayerConnectionListener 로 이동되었으므로 메인 클래스에서는 제거합니다.
 
     public void saveSkin(UUID uuid, int skinIndex) {
         playerSkins.put(uuid, skinIndex);
+        // 데이터 소스 저장은 비동기로 처리하는 것이 좋습니다. (이미 그렇게 구현되어 있다면 OK)
         dataSource.savePlayerSkin(uuid, skinIndex);
     }
 
@@ -74,12 +74,16 @@ public class DamageDisplay extends JavaPlugin implements Listener {
         return playerSkins.getOrDefault(uuid, 0);
     }
 
+    // PlayerJoinEvent 처리를 위한 메서드
+    public void loadPlayerSkinData(UUID uuid) {
+        dataSource.loadPlayerSkin(uuid).thenAcceptAsync(skinIndex -> playerSkins.put(uuid, skinIndex), runnable -> Bukkit.getScheduler().runTask(this, runnable));
+    }
+
     public boolean isEntityBlacklisted(EntityType type) {
         return blacklistManager.isBlacklisted(type);
     }
 
     private void initDataSource() {
-        // getConfig() 호출 시 문제가 발생하면 config.yml 파일의 문법 오류입니다.
         String storageType = getConfig().getString("storage.type", "SQLITE").toUpperCase();
         switch (storageType) {
             case "MYSQL" -> this.dataSource = new MySQLDataSource(this);
@@ -110,8 +114,17 @@ public class DamageDisplay extends JavaPlugin implements Listener {
         return mobOffsets;
     }
 
+    // [핵심] 캐싱된 값을 즉시 반환하도록 변경
     public int getMaxSkinIndex() {
+        return this.maxSkinIndex;
+    }
+
+    // [핵심] 실제 인덱스를 계산하는 로직
+    private void updateMaxSkinIndex() {
         File dir = new File(getDataFolder(), "images");
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
         int max = 0;
         File[] files = dir.listFiles((f, name) -> name.startsWith("normal") && name.endsWith(".png"));
         if (files != null) {
@@ -122,7 +135,8 @@ public class DamageDisplay extends JavaPlugin implements Listener {
                 } catch (NumberFormatException ignored) {}
             }
         }
-        return max;
+        this.maxSkinIndex = max;
+        getLogger().info("Max damage skin index cached: " + max);
     }
 
     public void reloadPlugin() {
@@ -131,13 +145,13 @@ public class DamageDisplay extends JavaPlugin implements Listener {
         if (blacklistManager != null) blacklistManager.saveIfDirtyAsync();
 
         loadMobOffsets();
+        updateMaxSkinIndex(); // [핵심] 리로드 시에도 스킨 인덱스 다시 계산
+
         blacklistManager = new BlacklistManager(this, getDataFolder());
         renderer = new DamageDisplayRendererImpl(this);
 
         getLogger().info("DamageDisplay fully reloaded.");
     }
-
-
 
     public BlacklistManager getBlacklistManager() {
         return blacklistManager;
