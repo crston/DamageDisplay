@@ -25,12 +25,12 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DamageDisplay extends JavaPlugin {
     private IDataSource dataSource;
     private BlacklistManager blacklistManager;
-    // [개선] 타입을 Impl로 명확히 하여 형변환 문제 방지
+    // 타입을 Impl로 명확히 하여 형변환 문제 방지
     private DamageDisplayRendererImpl renderer;
     private final Map<UUID, Integer> playerSkins = new ConcurrentHashMap<>();
     private final Map<String, Vector> mobOffsets = new ConcurrentHashMap<>();
 
-    // [핵심] maxSkinIndex 값을 캐싱할 변수
+    // maxSkinIndex 값을 캐싱할 변수
     private int maxSkinIndex = 0;
 
     @Override
@@ -38,14 +38,14 @@ public class DamageDisplay extends JavaPlugin {
         saveDefaultConfig();
         loadMobOffsets();
         initDataSource();
-        updateMaxSkinIndex(); // [핵심] 서버 시작 시 스킨 인덱스 계산
+        updateMaxSkinIndex(); // 서버 시작 시 스킨 인덱스 계산
 
         new ResourceFileCreator(getDataFolder()).createResourceFiles();
 
         blacklistManager = new BlacklistManager(this, getDataFolder());
         renderer = new DamageDisplayRendererImpl(this);
 
-        // [개선] 리스너 역할을 별도 클래스로 분리하여 등록
+        // 리스너 역할을 별도 클래스로 분리하여 등록
         Bukkit.getPluginManager().registerEvents(new EntityDamageListener(this, renderer), this);
         Bukkit.getPluginManager().registerEvents(new PlayerConnectionListener(this), this);
 
@@ -62,11 +62,9 @@ public class DamageDisplay extends JavaPlugin {
         if (dataSource != null) dataSource.close();
     }
 
-    // PlayerConnectionListener 로 이동되었으므로 메인 클래스에서는 제거합니다.
-
     public void saveSkin(UUID uuid, int skinIndex) {
         playerSkins.put(uuid, skinIndex);
-        // 데이터 소스 저장은 비동기로 처리하는 것이 좋습니다. (이미 그렇게 구현되어 있다면 OK)
+        // 데이터 소스 저장은 비동기로 처리
         dataSource.savePlayerSkin(uuid, skinIndex);
     }
 
@@ -84,15 +82,30 @@ public class DamageDisplay extends JavaPlugin {
     }
 
     private void initDataSource() {
-        String storageType = getConfig().getString("storage.type", "SQLITE").toUpperCase();
+        // [수정된 부분] 기본값을 "SQLITE"에서 "YAML"로 변경
+        String storageType = getConfig().getString("storage.type", "YAML").toUpperCase();
         switch (storageType) {
             case "MYSQL" -> this.dataSource = new MySQLDataSource(this);
+            // YAML을 기본값으로 사용하므로, default 케이스와 합쳐도 무방
             case "YAML" -> this.dataSource = new YamlDataSource(this);
-            default -> this.dataSource = new SQLiteDataSource(this);
+            default -> {
+                // 만약 YAML 이외의 잘못된 값이 들어올 경우를 대비해 SQLite를 fallback으로 두거나, YAML로 강제할 수 있음
+                // 여기서는 YAML을 기본으로 하므로 YamlDataSource를 사용
+                if (!storageType.equals("YAML")) {
+                    getLogger().warning("Invalid storage type '" + storageType + "'. Defaulting to YAML.");
+                }
+                this.dataSource = new YamlDataSource(this);
+            }
         }
+        // SQLite는 이제 명시적으로 설정해야만 사용됩니다.
+        if (storageType.equals("SQLITE")) {
+            this.dataSource = new SQLiteDataSource(this);
+        }
+
         getLogger().info("Using " + storageType + " for data storage.");
         this.dataSource.connect();
     }
+
 
     private void loadMobOffsets() {
         mobOffsets.clear();
@@ -114,12 +127,12 @@ public class DamageDisplay extends JavaPlugin {
         return mobOffsets;
     }
 
-    // [핵심] 캐싱된 값을 즉시 반환하도록 변경
+    // 캐싱된 값을 즉시 반환하도록 변경
     public int getMaxSkinIndex() {
         return this.maxSkinIndex;
     }
 
-    // [핵심] 실제 인덱스를 계산하는 로직
+    // 실제 인덱스를 계산하는 로직
     private void updateMaxSkinIndex() {
         File dir = new File(getDataFolder(), "images");
         if (!dir.exists()) {
@@ -145,7 +158,7 @@ public class DamageDisplay extends JavaPlugin {
         if (blacklistManager != null) blacklistManager.saveIfDirtyAsync();
 
         loadMobOffsets();
-        updateMaxSkinIndex(); // [핵심] 리로드 시에도 스킨 인덱스 다시 계산
+        updateMaxSkinIndex(); // 리로드 시에도 스킨 인덱스 다시 계산
 
         blacklistManager = new BlacklistManager(this, getDataFolder());
         renderer = new DamageDisplayRendererImpl(this);
