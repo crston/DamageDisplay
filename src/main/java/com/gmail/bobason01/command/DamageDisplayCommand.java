@@ -30,21 +30,17 @@ public class DamageDisplayCommand implements TabExecutor {
         }
 
         switch (args[0].toLowerCase()) {
-            case "reload" -> {
+            case "reload":
                 plugin.reloadPlugin();
                 sender.sendMessage("[DamageDisplay] Reloaded.");
                 return true;
-            }
-            case "set" -> {
+            case "set":
                 return handleSet(sender, args);
-            }
-            case "blacklist" -> {
+            case "blacklist":
                 return handleBlacklist(sender, args);
-            }
-            default -> {
+            default:
                 sender.sendMessage("Unknown subcommand. Use: reload, set, blacklist");
                 return true;
-            }
         }
     }
 
@@ -127,7 +123,6 @@ public class DamageDisplayCommand implements TabExecutor {
         } catch (IllegalArgumentException e) {
             sender.sendMessage("Invalid entity type: " + args[2]);
         }
-
         return true;
     }
 
@@ -139,7 +134,7 @@ public class DamageDisplayCommand implements TabExecutor {
 
         if (args[0].equalsIgnoreCase("set")) {
             if (args.length == 2) return List.of("0", "1", "2", "3");
-            if (args.length == 3) return null; // Let Bukkit suggest player names
+            if (args.length == 3) return null;
         }
 
         if (args[0].equalsIgnoreCase("blacklist")) {
@@ -151,7 +146,6 @@ public class DamageDisplayCommand implements TabExecutor {
                         .toList();
             }
         }
-
         return Collections.emptyList();
     }
 }

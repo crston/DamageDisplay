@@ -19,10 +19,6 @@ public class EntityDamageListener implements Listener {
         this.renderer = renderer;
     }
 
-    /**
-     * 엔티티가 다른 엔티티에 의해 피해를 입었을 때 호출됩니다.
-     * @param event EntityDamageByEntityEvent
-     */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDamage(EntityDamageByEntityEvent event) {
         if (!(event.getEntity() instanceof Damageable)) {
@@ -30,7 +26,6 @@ public class EntityDamageListener implements Listener {
         }
 
         Entity target = event.getEntity();
-
         if (plugin.isEntityBlacklisted(target.getType())) {
             return;
         }
@@ -48,9 +43,8 @@ public class EntityDamageListener implements Listener {
         Entity damager = event.getDamager();
         Location loc = target.getLocation();
 
-        // [수정된 부분] 가해자와 피해자 정보를 모두 넘겨줍니다.
-        DamageDisplayRendererImpl.CachedAura aura = renderer.getAuraData(damager, target);
+        DamageDisplayRendererImpl.DamageData data = renderer.getDamageData(damager, target);
 
-        plugin.getServer().getScheduler().runTask(plugin, () -> renderer.display(loc, shownDamage, aura.isCritical(), aura.skinIndex(), aura.offset()));
+        plugin.getServer().getScheduler().runTask(plugin, () -> renderer.display(loc, shownDamage, data.isCritical(), data.skinIndex(), data.offset()));
     }
 }

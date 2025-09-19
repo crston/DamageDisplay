@@ -15,7 +15,6 @@ public class ResourceFileCreator {
     private static final Logger LOGGER = Logger.getLogger(ResourceFileCreator.class.getName());
     private final File dataFolder;
 
-    // Direct download links using raw=1
     private static final String CRITICAL_IMAGE_URL = "https://www.dropbox.com/scl/fi/kmxxb2d3gdhq3vglyoagl/critical0.png?raw=1";
     private static final String NORMAL_IMAGE_URL = "https://www.dropbox.com/scl/fi/dpyg9yta6445lxi6hnpq5/normal0.png?raw=1";
 
@@ -29,7 +28,6 @@ public class ResourceFileCreator {
         File imagesDir = new File(dataFolder, "images");
         File buildDir = new File(dataFolder, "build");
 
-        // Create the necessary directories upfront to ensure they exist before the async task
         Stream.of(texturesDir, fontsDir, imagesDir, buildDir).forEach(this::createDir);
 
         CompletableFuture.runAsync(() -> {

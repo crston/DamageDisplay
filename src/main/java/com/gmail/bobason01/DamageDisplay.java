@@ -25,12 +25,9 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DamageDisplay extends JavaPlugin {
     private IDataSource dataSource;
     private BlacklistManager blacklistManager;
-    // 타입을 Impl로 명확히 하여 형변환 문제 방지
     private DamageDisplayRendererImpl renderer;
     private final Map<UUID, Integer> playerSkins = new ConcurrentHashMap<>();
     private final Map<String, Vector> mobOffsets = new ConcurrentHashMap<>();
-
-    // maxSkinIndex 값을 캐싱할 변수
     private int maxSkinIndex = 0;
 
     @Override
@@ -38,21 +35,20 @@ public class DamageDisplay extends JavaPlugin {
         saveDefaultConfig();
         loadMobOffsets();
         initDataSource();
-        updateMaxSkinIndex(); // 서버 시작 시 스킨 인덱스 계산
+        updateMaxSkinIndex();
 
         new ResourceFileCreator(getDataFolder()).createResourceFiles();
 
         blacklistManager = new BlacklistManager(this, getDataFolder());
         renderer = new DamageDisplayRendererImpl(this);
 
-        // 리스너 역할을 별도 클래스로 분리하여 등록
         Bukkit.getPluginManager().registerEvents(new EntityDamageListener(this, renderer), this);
         Bukkit.getPluginManager().registerEvents(new PlayerConnectionListener(this), this);
 
         new DamageDisplayCommand(this);
         new BugReportCommand(this);
 
-        getLogger().info("DamageDisplay enabled with renderer: " + renderer.getClass().getSimpleName());
+        getLogger().info("DamageDisplay enabled with Vanilla Critical system.");
     }
 
     @Override
@@ -64,7 +60,6 @@ public class DamageDisplay extends JavaPlugin {
 
     public void saveSkin(UUID uuid, int skinIndex) {
         playerSkins.put(uuid, skinIndex);
-        // 데이터 소스 저장은 비동기로 처리
         dataSource.savePlayerSkin(uuid, skinIndex);
     }
 
@@ -72,9 +67,12 @@ public class DamageDisplay extends JavaPlugin {
         return playerSkins.getOrDefault(uuid, 0);
     }
 
-    // PlayerJoinEvent 처리를 위한 메서드
     public void loadPlayerSkinData(UUID uuid) {
         dataSource.loadPlayerSkin(uuid).thenAcceptAsync(skinIndex -> playerSkins.put(uuid, skinIndex), runnable -> Bukkit.getScheduler().runTask(this, runnable));
+    }
+
+    public void unloadPlayerSkinData(UUID uuid) {
+        playerSkins.remove(uuid);
     }
 
     public boolean isEntityBlacklisted(EntityType type) {
@@ -82,30 +80,26 @@ public class DamageDisplay extends JavaPlugin {
     }
 
     private void initDataSource() {
-        // [수정된 부분] 기본값을 "SQLITE"에서 "YAML"로 변경
         String storageType = getConfig().getString("storage.type", "YAML").toUpperCase();
         switch (storageType) {
-            case "MYSQL" -> this.dataSource = new MySQLDataSource(this);
-            // YAML을 기본값으로 사용하므로, default 케이스와 합쳐도 무방
-            case "YAML" -> this.dataSource = new YamlDataSource(this);
-            default -> {
-                // 만약 YAML 이외의 잘못된 값이 들어올 경우를 대비해 SQLite를 fallback으로 두거나, YAML로 강제할 수 있음
-                // 여기서는 YAML을 기본으로 하므로 YamlDataSource를 사용
+            case "MYSQL":
+                this.dataSource = new MySQLDataSource(this);
+                break;
+            case "SQLITE":
+                this.dataSource = new SQLiteDataSource(this);
+                break;
+            case "YAML":
+            default:
                 if (!storageType.equals("YAML")) {
                     getLogger().warning("Invalid storage type '" + storageType + "'. Defaulting to YAML.");
                 }
                 this.dataSource = new YamlDataSource(this);
-            }
-        }
-        // SQLite는 이제 명시적으로 설정해야만 사용됩니다.
-        if (storageType.equals("SQLITE")) {
-            this.dataSource = new SQLiteDataSource(this);
+                break;
         }
 
         getLogger().info("Using " + storageType + " for data storage.");
         this.dataSource.connect();
     }
-
 
     private void loadMobOffsets() {
         mobOffsets.clear();
@@ -114,6 +108,12 @@ public class DamageDisplay extends JavaPlugin {
             saveResource("mob-offsets.yml", false);
         }
         FileConfiguration offsetsConfig = YamlConfiguration.loadConfiguration(offsetsFile);
+
+        if (offsetsConfig.getKeys(false).isEmpty()) {
+            getLogger().info("mob-offsets.yml is empty. No custom mob offsets loaded.");
+            return;
+        }
+
         for (String key : offsetsConfig.getKeys(false)) {
             double x = offsetsConfig.getDouble(key + ".x", 0);
             double y = offsetsConfig.getDouble(key + ".y", 2.0);
@@ -127,16 +127,15 @@ public class DamageDisplay extends JavaPlugin {
         return mobOffsets;
     }
 
-    // 캐싱된 값을 즉시 반환하도록 변경
     public int getMaxSkinIndex() {
         return this.maxSkinIndex;
     }
 
-    // 실제 인덱스를 계산하는 로직
     private void updateMaxSkinIndex() {
         File dir = new File(getDataFolder(), "images");
-        if (!dir.exists()) {
-            dir.mkdirs();
+        if (!dir.exists() && !dir.mkdirs()) {
+            this.maxSkinIndex = 0;
+            return;
         }
         int max = 0;
         File[] files = dir.listFiles((f, name) -> name.startsWith("normal") && name.endsWith(".png"));
@@ -158,7 +157,7 @@ public class DamageDisplay extends JavaPlugin {
         if (blacklistManager != null) blacklistManager.saveIfDirtyAsync();
 
         loadMobOffsets();
-        updateMaxSkinIndex(); // 리로드 시에도 스킨 인덱스 다시 계산
+        updateMaxSkinIndex();
 
         blacklistManager = new BlacklistManager(this, getDataFolder());
         renderer = new DamageDisplayRendererImpl(this);
