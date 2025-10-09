@@ -15,8 +15,8 @@ public class ResourceFileCreator {
     private static final Logger LOGGER = Logger.getLogger(ResourceFileCreator.class.getName());
     private final File dataFolder;
 
-    private static final String CRITICAL_IMAGE_URL = "https://www.dropbox.com/scl/fi/kmxxb2d3gdhq3vglyoagl/critical0.png?raw=1";
-    private static final String NORMAL_IMAGE_URL = "https://www.dropbox.com/scl/fi/dpyg9yta6445lxi6hnpq5/normal0.png?raw=1";
+    private static final String CRITICAL_IMAGE_URL = "https://www.dropbox.com/scl/fi/kmxxb2d3gdhq3vglyoagl/critical0.png?rlkey=zm7brqiidiphgz0ktcmfqnx22&st=1z30bwzv&dl=1";
+    private static final String NORMAL_IMAGE_URL = "https://www.dropbox.com/scl/fi/dpyg9yta6445lxi6hnpq5/normal0.png?rlkey=0qod2zyvytw421223dcpk1lqf&st=u0hlbj7v&dl=1";
 
     public ResourceFileCreator(File dataFolder) {
         this.dataFolder = dataFolder;

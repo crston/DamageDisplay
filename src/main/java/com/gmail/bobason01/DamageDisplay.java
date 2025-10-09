@@ -48,7 +48,7 @@ public class DamageDisplay extends JavaPlugin {
         new DamageDisplayCommand(this);
         new BugReportCommand(this);
 
-        getLogger().info("DamageDisplay enabled with Vanilla Critical system.");
+        getLogger().info("DamageDisplay enabled.");
     }
 
     @Override
@@ -68,7 +68,10 @@ public class DamageDisplay extends JavaPlugin {
     }
 
     public void loadPlayerSkinData(UUID uuid) {
-        dataSource.loadPlayerSkin(uuid).thenAcceptAsync(skinIndex -> playerSkins.put(uuid, skinIndex), runnable -> Bukkit.getScheduler().runTask(this, runnable));
+        dataSource.loadPlayerSkin(uuid).thenAcceptAsync(
+                skinIndex -> playerSkins.put(uuid, skinIndex),
+                runnable -> Bukkit.getScheduler().runTask(this, runnable)
+        );
     }
 
     public void unloadPlayerSkinData(UUID uuid) {
@@ -108,11 +111,6 @@ public class DamageDisplay extends JavaPlugin {
             saveResource("mob-offsets.yml", false);
         }
         FileConfiguration offsetsConfig = YamlConfiguration.loadConfiguration(offsetsFile);
-
-        if (offsetsConfig.getKeys(false).isEmpty()) {
-            getLogger().info("mob-offsets.yml is empty. No custom mob offsets loaded.");
-            return;
-        }
 
         for (String key : offsetsConfig.getKeys(false)) {
             double x = offsetsConfig.getDouble(key + ".x", 0);

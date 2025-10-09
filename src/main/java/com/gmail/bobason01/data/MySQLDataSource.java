@@ -5,10 +5,7 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import org.bukkit.configuration.file.FileConfiguration;
 
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
@@ -26,8 +23,10 @@ public class MySQLDataSource implements IDataSource {
         FileConfiguration config = plugin.getConfig();
         try {
             HikariConfig hikariConfig = new HikariConfig();
-            hikariConfig.setJdbcUrl("jdbc:mariadb://" + config.getString("storage.mysql.host") + ":" +
-                    config.getInt("storage.mysql.port") + "/" + config.getString("storage.mysql.database"));
+            hikariConfig.setJdbcUrl("jdbc:mariadb://" +
+                    config.getString("storage.mysql.host") + ":" +
+                    config.getInt("storage.mysql.port") + "/" +
+                    config.getString("storage.mysql.database"));
             hikariConfig.setUsername(config.getString("storage.mysql.username"));
             hikariConfig.setPassword(config.getString("storage.mysql.password"));
             hikariConfig.addDataSourceProperty("cachePrepStmts", "true");

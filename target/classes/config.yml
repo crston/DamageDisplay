@@ -1,6 +1,6 @@
 # 데이터 저장 방식을 선택합니다. (YAML, SQLITE, MYSQL 중 하나)
 storage:
-  type: "SQLITE"
+  type: "YAML"
   mysql:
     host: "localhost"
     port: 3306

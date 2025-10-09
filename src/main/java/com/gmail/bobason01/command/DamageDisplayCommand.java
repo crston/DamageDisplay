@@ -60,6 +60,10 @@ public class DamageDisplayCommand implements TabExecutor {
 
         Player target = null;
         if (args.length == 3) {
+            if (!sender.hasPermission("damagedisplay.set.others")) {
+                sender.sendMessage("You do not have permission to change other players' skins.");
+                return true;
+            }
             target = Bukkit.getPlayerExact(args[2]);
             if (target == null) {
                 sender.sendMessage("Player not found: " + args[2]);
@@ -70,12 +74,12 @@ public class DamageDisplayCommand implements TabExecutor {
         }
 
         if (target == null) {
-            sender.sendMessage("Only players can use this command without specifying a player name.");
+            sender.sendMessage("Please specify a player name when using this command from the console.");
             return true;
         }
 
         if (index > 0 && !target.hasPermission("damagedisplay.skin." + index)) {
-            sender.sendMessage("You do not have permission for this skin.");
+            sender.sendMessage(target.getName() + " does not have permission for skin " + index + ".");
             return true;
         }
 

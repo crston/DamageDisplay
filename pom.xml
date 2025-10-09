@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.gmail.bobason01</groupId>
     <artifactId>DamageDisplay</artifactId>
-    <version>7.0</version>
+    <version>8.0</version>
     <name>DamageDisplay</name>
 
     <properties>
@@ -48,6 +48,16 @@
             <artifactId>HikariCP</artifactId>
             <version>5.1.0</version>
             <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.45.1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+            <version>5.1.0</version>
         </dependency>
     </dependencies>
 

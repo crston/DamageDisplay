@@ -6,10 +6,7 @@ import com.zaxxer.hikari.HikariDataSource;
 
 import java.io.File;
 import java.io.IOException;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
@@ -24,23 +21,21 @@ public class SQLiteDataSource implements IDataSource {
 
     @Override
     public void connect() {
-        File dbFile = new File(plugin.getDataFolder(), "playerdata.db");
-        if (!dbFile.exists()) {
-            try {
+        try {
+            File dbFile = new File(plugin.getDataFolder(), "playerdata.db");
+            if (!dbFile.exists()) {
                 dbFile.createNewFile();
-            } catch (IOException e) {
-                plugin.getLogger().log(Level.SEVERE, "Failed to create SQLite database file.", e);
-                return;
             }
+            HikariConfig config = new HikariConfig();
+            config.setJdbcUrl("jdbc:sqlite:" + dbFile.getAbsolutePath());
+            config.setPoolName("DamageDisplay-SQLite-Pool");
+            config.setMaximumPoolSize(5);
+            dataSource = new HikariDataSource(config);
+            plugin.getLogger().info("SQLite connection pool successfully initialized.");
+            createTable();
+        } catch (IOException e) {
+            plugin.getLogger().log(Level.SEVERE, "Failed to create SQLite database file.", e);
         }
-
-        HikariConfig config = new HikariConfig();
-        config.setJdbcUrl("jdbc:sqlite:" + dbFile.getAbsolutePath());
-        config.setPoolName("DamageDisplay-SQLite-Pool");
-        config.setMaximumPoolSize(10); // SQLite can handle a few more connections
-        dataSource = new HikariDataSource(config);
-        plugin.getLogger().info("SQLite connection pool successfully initialized.");
-        createTable();
     }
 
     private void createTable() {
