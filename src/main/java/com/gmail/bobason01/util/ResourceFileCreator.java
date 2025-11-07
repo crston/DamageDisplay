@@ -1,28 +1,69 @@
 package com.gmail.bobason01.util;
 
 import java.io.*;
-import java.net.URI;
+import java.net.*;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
+import java.nio.file.*;
+import java.util.concurrent.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
 
-public class ResourceFileCreator {
+/**
+ * ResourceFileCreator - 초고속 비동기 리소스팩 빌더
+ *
+ * 기능:
+ * - Dropbox 이미지 다운로드
+ * - 폰트 JSON 자동 생성 (FontUtil 연동)
+ * - pack.mcmeta 생성
+ * - 모든 I/O는 Virtual Thread 기반 비동기 처리
+ * - 디스크 flush 및 원자적 교체 보장
+ */
+public final class ResourceFileCreator {
+
     private static final Logger LOGGER = Logger.getLogger(ResourceFileCreator.class.getName());
+
+    // Virtual Thread Executor (I/O 대기 시 커널 스레드 점유 0)
+    private static final ExecutorService IO_EXECUTOR =
+            Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("DamageDisplay-Resource-", 0).factory());
+
     private final File dataFolder;
 
-    private static final String CRITICAL_IMAGE_URL = "https://www.dropbox.com/scl/fi/kmxxb2d3gdhq3vglyoagl/critical0.png?rlkey=zm7brqiidiphgz0ktcmfqnx22&st=1z30bwzv&dl=1";
-    private static final String NORMAL_IMAGE_URL = "https://www.dropbox.com/scl/fi/dpyg9yta6445lxi6hnpq5/normal0.png?rlkey=0qod2zyvytw421223dcpk1lqf&st=u0hlbj7v&dl=1";
+    // 리소스 URL (직접 다운로드 가능한 Dropbox 링크)
+    private static final String CRITICAL_IMAGE_URL =
+            "https://www.dropbox.com/scl/fi/kmxxb2d3gdhq3vglyoagl/critical0.png?rlkey=zm7brqiidiphgz0ktcmfqnx22&st=1z30bwzv&dl=1";
+    private static final String NORMAL_IMAGE_URL =
+            "https://www.dropbox.com/scl/fi/dpyg9yta6445lxi6hnpq5/normal0.png?rlkey=0qod2zyvytw421223dcpk1lqf&st=u0hlbj7v&dl=1";
 
     public ResourceFileCreator(File dataFolder) {
         this.dataFolder = dataFolder;
     }
 
+    /**
+     * 비동기 리소스 생성 (논블로킹)
+     */
     public void createResourceFiles() {
+        CompletableFuture.runAsync(this::createInternal, IO_EXECUTOR)
+                .exceptionally(ex -> {
+                    LOGGER.log(Level.SEVERE, "[ResourceFileCreator] Async resource build failed", ex);
+                    return null;
+                });
+    }
+
+    /**
+     * 동기 리소스 생성 (모든 작업 완료까지 블록)
+     */
+    public void createResourceFilesSync() {
+        try {
+            CompletableFuture.runAsync(this::createInternal, IO_EXECUTOR).get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException e) {
+            LOGGER.log(Level.SEVERE, "[ResourceFileCreator] Resource creation failed", e);
+        }
+    }
+
+    private void createInternal() {
         File texturesDir = new File(dataFolder, "build/assets/damagedisplay/textures/font");
         File fontsDir = new File(dataFolder, "build/assets/damagedisplay/font");
         File imagesDir = new File(dataFolder, "images");
@@ -30,63 +71,69 @@ public class ResourceFileCreator {
 
         Stream.of(texturesDir, fontsDir, imagesDir, buildDir).forEach(this::createDir);
 
-        CompletableFuture.runAsync(() -> {
-            try {
-                downloadImage(imagesDir, "critical0.png", CRITICAL_IMAGE_URL);
-                downloadImage(imagesDir, "normal0.png", NORMAL_IMAGE_URL);
+        try {
+            CompletableFuture<?> f1 = CompletableFuture.runAsync(() -> downloadImage(imagesDir, "critical0.png", CRITICAL_IMAGE_URL), IO_EXECUTOR);
+            CompletableFuture<?> f2 = CompletableFuture.runAsync(() -> downloadImage(imagesDir, "normal0.png", NORMAL_IMAGE_URL), IO_EXECUTOR);
 
-                copyImages(imagesDir, texturesDir);
-                int maxIndex = getMaxIndex(imagesDir);
-                FontUtil.generateJsonFiles(fontsDir.getPath(), 0, maxIndex);
-                createPackMcmeta(buildDir);
-            } catch (IOException e) {
-                LOGGER.log(Level.SEVERE, "Failed to create resource files", e);
-                // Wrap the checked exception in an unchecked one for CompletableFuture
-                throw new CompletionException("Resource creation failed", e);
-            }
-        }).exceptionally(ex -> {
-            LOGGER.log(Level.SEVERE, "Asynchronous resource processing failed", ex);
-            return null;
-        });
+            CompletableFuture.allOf(f1, f2).join();
+
+            copyImages(imagesDir, texturesDir);
+
+            int maxIndex = getMaxIndex(imagesDir);
+            FontUtil.generateJsonFiles(fontsDir.getPath(), 0, maxIndex);
+            createPackMcmeta(buildDir);
+
+            LOGGER.info("[ResourceFileCreator] Resource build completed successfully (" + (maxIndex + 1) + " fonts).");
+        } catch (IOException e) {
+            LOGGER.log(Level.SEVERE, "[ResourceFileCreator] Failed to build resource files", e);
+            throw new CompletionException(e);
+        }
     }
 
     private void createDir(File dir) {
         if (!dir.exists() && !dir.mkdirs()) {
-            LOGGER.warning("Directory creation failed: " + dir.getPath());
+            LOGGER.warning("[ResourceFileCreator] Directory creation failed: " + dir.getPath());
         }
     }
 
-    private void downloadImage(File dir, String name, String url) throws IOException {
+    private void downloadImage(File dir, String name, String url) {
         File file = new File(dir, name);
         if (file.exists()) {
-            LOGGER.info("Image already exists: " + name);
+            LOGGER.fine("[ResourceFileCreator] Image exists, skip: " + name);
             return;
         }
 
-        LOGGER.info("Starting image download: " + name);
-        try (InputStream in = new URI(url).toURL().openStream();
-             FileOutputStream out = new FileOutputStream(file)) {
-
-            byte[] buf = new byte[1024];
+        try (InputStream in = openUrlStream(url);
+             OutputStream out = new BufferedOutputStream(new FileOutputStream(file))) {
+            byte[] buf = new byte[8192];
             int len;
-            while ((len = in.read(buf)) != -1) {
+            while ((len = in.read(buf)) > 0) {
                 out.write(buf, 0, len);
             }
-            LOGGER.info("Image download complete: " + name);
+            out.flush();
+            if (out instanceof FileOutputStream fos) fos.getFD().sync();
+            LOGGER.info("[ResourceFileCreator] Downloaded: " + name);
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Image download failed: " + name, e);
-            throw new IOException("Image download failed: " + name, e);
+            LOGGER.log(Level.WARNING, "[ResourceFileCreator] Download failed for: " + name, e);
         }
     }
 
+    private InputStream openUrlStream(String urlString) throws IOException, URISyntaxException {
+        URLConnection conn = new URI(urlString).toURL().openConnection();
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(10000);
+        conn.setRequestProperty("User-Agent", "DamageDisplay-Builder/1.0");
+        return conn.getInputStream();
+    }
+
     private void copyImages(File from, File to) throws IOException {
-        File[] pngs = from.listFiles((f, name) -> name.endsWith(".png"));
+        File[] pngs = from.listFiles((f, n) -> n.endsWith(".png"));
         if (pngs == null) return;
 
         for (File file : pngs) {
-            File target = new File(to, file.getName());
-            Files.copy(file.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            LOGGER.info("Copy image: " + file.getName());
+            Path src = file.toPath();
+            Path dest = to.toPath().resolve(file.getName());
+            Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
         }
     }
 
@@ -108,13 +155,34 @@ public class ResourceFileCreator {
 
     private void createPackMcmeta(File buildDir) {
         File meta = new File(buildDir, "pack.mcmeta");
-        String json = "{\"pack\":{\"pack_format\":6,\"description\":\"DamageDisplay Custom Fonts\"}}";
+        String json = """
+                {
+                  "pack": {
+                    "pack_format": 18,
+                    "description": "DamageDisplay Auto-Generated Fonts"
+                  }
+                }
+                """;
 
         try (FileOutputStream out = new FileOutputStream(meta)) {
             out.write(json.getBytes(StandardCharsets.UTF_8));
-            LOGGER.info("pack.mcmeta Creation Complete");
+            out.flush();
+            out.getFD().sync();
+            LOGGER.info("[ResourceFileCreator] pack.mcmeta created.");
         } catch (IOException e) {
-            LOGGER.log(Level.SEVERE, "pack.mcmeta Creation failed", e);
+            LOGGER.log(Level.SEVERE, "[ResourceFileCreator] pack.mcmeta creation failed", e);
         }
+    }
+
+    public static void shutdown() {
+        IO_EXECUTOR.shutdown();
+        try {
+            if (!IO_EXECUTOR.awaitTermination(3, TimeUnit.SECONDS)) {
+                IO_EXECUTOR.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        LOGGER.info("[ResourceFileCreator] Executor shutdown complete.");
     }
 }

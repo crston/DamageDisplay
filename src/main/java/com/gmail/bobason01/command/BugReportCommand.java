@@ -9,31 +9,50 @@ import org.bukkit.command.PluginCommand;
 import org.bukkit.command.TabExecutor;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
-public class BugReportCommand implements TabExecutor {
+/**
+ * BugReportCommand
+ * - /crston 명령어 처리
+ * - GC-friendly, 불변 구조, Java 21의 record 문법 기반
+ */
+public record BugReportCommand(@NotNull DamageDisplay plugin) implements TabExecutor {
 
-    public BugReportCommand(DamageDisplay plugin) {
-        PluginCommand command = plugin.getCommand("crston");
-        if (command != null) {
-            command.setExecutor(this);
-            command.setTabCompleter(this);
+    // 미리 생성된 불변 Adventure Component (빌더 경로 제거)
+    private static final Component MESSAGE = Component.textOfChildren(
+            Component.text("Discord - crston", NamedTextColor.LIGHT_PURPLE)
+    );
+
+    // 빈 리스트 캐싱
+    private static final List<String> EMPTY_LIST = List.of();
+
+    public BugReportCommand {
+        Objects.requireNonNull(plugin, "plugin must not be null");
+        final PluginCommand cmd = plugin.getCommand("crston");
+        if (cmd != null) {
+            cmd.setExecutor(this);
+            cmd.setTabCompleter(this);
+        } else {
+            plugin.getLogger().warning(() ->
+                    String.format("[BugReportCommand] Command '%s' not found in plugin.yml", "crston"));
         }
     }
 
     @Override
-    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
-                             @NotNull String label, @NotNull String @NotNull [] args) {
-        Component message = Component.text("Discord - crston")
-                .color(NamedTextColor.LIGHT_PURPLE); // 2. NamedTextColor로 색상을 지정합니다.
-        sender.sendMessage(message);
+    public boolean onCommand(@NotNull CommandSender sender,
+                             @NotNull Command command,
+                             @NotNull String label,
+                             @NotNull String[] args) {
+        sender.sendMessage(MESSAGE);
         return true;
     }
 
     @Override
-    public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command,
-                                      @NotNull String alias, @NotNull String @NotNull [] args) {
-        return Collections.emptyList();
+    public List<String> onTabComplete(@NotNull CommandSender sender,
+                                      @NotNull Command command,
+                                      @NotNull String alias,
+                                      @NotNull String[] args) {
+        return EMPTY_LIST;
     }
 }
