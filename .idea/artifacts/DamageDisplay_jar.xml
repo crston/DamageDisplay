@@ -3,6 +3,8 @@
     <output-path>$PROJECT_DIR$/out/artifacts/DamageDisplay_jar</output-path>
     <root id="archive" name="DamageDisplay.jar">
       <element id="module-output" name="DamageDisplay" />
+      <element id="extracted-dir" path="$MAVEN_REPOSITORY$/org/xerial/sqlite-jdbc/3.45.1.0/sqlite-jdbc-3.45.1.0.jar" path-in-jar="/" />
+      <element id="extracted-dir" path="$MAVEN_REPOSITORY$/com/zaxxer/HikariCP/5.1.0/HikariCP-5.1.0.jar" path-in-jar="/" />
     </root>
   </artifact>
 </component>
