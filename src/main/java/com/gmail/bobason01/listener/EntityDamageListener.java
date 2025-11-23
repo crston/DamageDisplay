@@ -10,24 +10,10 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 
-/**
- * EntityDamageListener - Java 21 최적화 버전
- * - 모든 연산을 상수시간 내 수행
- * - 불필요한 객체 생성 최소화
- * - 스케줄러 호출 오버헤드 최소화
- */
 public final class EntityDamageListener implements Listener {
 
     private final DamageDisplay plugin;
     private final DamageDisplayRendererImpl renderer;
-
-    // 미리 생성된 Runnable (가변 파라미터 캡처 없는 경우)
-    private final Runnable displayTask = new Runnable() {
-        @Override
-        public void run() {
-            // 빈 껍데기: 람다 대신 구조적 참조용
-        }
-    };
 
     public EntityDamageListener(DamageDisplay plugin, DamageDisplayRendererImpl renderer) {
         this.plugin = plugin;
@@ -36,31 +22,35 @@ public final class EntityDamageListener implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onDamage(EntityDamageByEntityEvent event) {
-        // 빠른 필터링 (가장 앞에서 걸러냄)
-        final Entity target = event.getEntity();
-        if (!(target instanceof Damageable)) return;
-        if (plugin.isEntityBlacklisted(target.getType())) return;
+        Entity victim = event.getEntity();
+        if (!(victim instanceof Damageable)) {
+            return;
+        }
 
-        final double dmg = event.getFinalDamage();
-        if (dmg <= 0.0) return;
+        if (plugin.isEntityBlacklisted(victim.getType())) {
+            return;
+        }
 
-        final int shownDamage = (int) (dmg + 0.5);
-        if (shownDamage <= 0) return;
+        double damage = event.getFinalDamage();
+        if (damage <= 0.0) {
+            return;
+        }
 
-        final Entity damager = event.getDamager();
-        final Location loc = target.getLocation();
+        int shownDamage = (int) (damage + 0.5);
+        if (shownDamage <= 0) {
+            return;
+        }
 
-        // 렌더링 데이터 사전 계산 (hot path)
-        final DamageDisplayRendererImpl.DamageData data = renderer.getDamageData(damager, target);
+        Entity damager = event.getDamager();
+        Location loc = victim.getLocation();
 
-        // 메인 스레드 안전 렌더링 호출
-        final double[] offSrc = data.offset();
-        final double ox = (offSrc != null && offSrc.length > 0) ? offSrc[0] : 0.0;
-        final double oy = (offSrc != null && offSrc.length > 1) ? offSrc[1] : 0.0;
-        final double oz = (offSrc != null && offSrc.length > 2) ? offSrc[2] : 0.0;
+        DamageDisplayRendererImpl.DamageData data = renderer.buildDamageData(damager, victim, damage);
+        double[] offset = data.offset();
 
-        plugin.getServer().getScheduler().runTask(plugin, () ->
-                renderer.display(loc, shownDamage, data.isCritical(), data.skinIndex(), data.offset())
-        );
+        double ox = offset != null && offset.length > 0 ? offset[0] : 0.0;
+        double oy = offset != null && offset.length > 1 ? offset[1] : 0.0;
+        double oz = offset != null && offset.length > 2 ? offset[2] : 0.0;
+
+        renderer.display(loc, shownDamage, data.critical(), data.skinIndex(), ox, oy, oz);
     }
 }

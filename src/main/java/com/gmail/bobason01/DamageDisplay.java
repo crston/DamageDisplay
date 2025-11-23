@@ -1,7 +1,6 @@
 package com.gmail.bobason01;
 
 import com.gmail.bobason01.blacklist.BlacklistManager;
-import com.gmail.bobason01.command.BugReportCommand;
 import com.gmail.bobason01.command.DamageDisplayCommand;
 import com.gmail.bobason01.data.IDataSource;
 import com.gmail.bobason01.data.MySQLDataSource;
@@ -9,7 +8,7 @@ import com.gmail.bobason01.data.SQLiteDataSource;
 import com.gmail.bobason01.data.YamlDataSource;
 import com.gmail.bobason01.listener.EntityDamageListener;
 import com.gmail.bobason01.listener.PlayerConnectionListener;
-import com.gmail.bobason01.util.ResourceFileCreator;
+import com.gmail.bobason01.util.ResourcePackBuilder;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -21,185 +20,156 @@ import java.io.File;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 
-public class DamageDisplay extends JavaPlugin {
+public final class DamageDisplay extends JavaPlugin {
 
     private IDataSource dataSource;
     private BlacklistManager blacklistManager;
     private DamageDisplayRendererImpl renderer;
-    private ResourceFileCreator resourceBuilder;
+    private ResourcePackBuilder resourcePackBuilder;
 
     private final Map<UUID, Integer> playerSkins = new ConcurrentHashMap<>();
-    private final Map<String, Vector> mobOffsets = new ConcurrentHashMap<>();
+    private final Map<EntityType, Vector> mobOffsets = new ConcurrentHashMap<>();
     private int maxSkinIndex = 0;
 
-    // 플러그인 전용 I O 실행기 가상 스레드 기반
-    private final ExecutorService ioExecutor =
-            Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("DamageDisplay-IO-", 0).factory());
+    private ExecutorService ioExecutor;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        setupIoExecutor();
         loadMobOffsets();
         initDataSource();
         updateMaxSkinIndex();
 
-        // 리소스팩 생성 비동기 실행
-        resourceBuilder = new ResourceFileCreator(getDataFolder());
-        CompletableFuture.runAsync(resourceBuilder::createResourceFiles, ioExecutor)
-                .exceptionally(ex -> {
-                    getLogger().log(Level.SEVERE, "[Resource] Build failed", ex);
-                    return null;
-                });
+        resourcePackBuilder = new ResourcePackBuilder(getDataFolder(), ioExecutor);
 
-        blacklistManager = new BlacklistManager(this, getDataFolder());
+        blacklistManager = new BlacklistManager(this, new File(getDataFolder(), "blacklist.yml"));
         renderer = new DamageDisplayRendererImpl(this);
 
         Bukkit.getPluginManager().registerEvents(new EntityDamageListener(this, renderer), this);
         Bukkit.getPluginManager().registerEvents(new PlayerConnectionListener(this), this);
 
         new DamageDisplayCommand(this);
-        new BugReportCommand(this);
 
-        getLogger().info(() -> "DamageDisplay enabled successfully.");
+        getLogger().info("DamageDisplay enabled");
     }
 
     @Override
     public void onDisable() {
-        if (renderer != null) {
-            try {
+        try {
+            if (renderer != null) {
                 renderer.removeAll();
-            } catch (Throwable t) {
-                getLogger().log(Level.WARNING, "Renderer cleanup error", t);
             }
+        } catch (Throwable t) {
+            getLogger().log(Level.WARNING, "Renderer cleanup error", t);
         }
 
-        // 블랙리스트 저장 보장 호출
         if (blacklistManager != null) {
             try {
-                // saveIfDirtyAsync가 CompletableFuture 반환하는 구현을 가정
-                // 기존 void 시그니처라면 경고 없이 넘어가도록 안전 처리
-                var saveFutureRef = new AtomicReference<CompletableFuture<Void>>();
-                try {
-                    var m = BlacklistManager.class.getMethod("saveIfDirtyAsync");
-                    var ret = m.invoke(blacklistManager);
-                    if (ret instanceof CompletableFuture) {
-                        //noinspection unchecked
-                        saveFutureRef.set((CompletableFuture<Void>) ret);
-                    }
-                } catch (NoSuchMethodException ignored) {
-                    // 메서드가 없거나 void 반환이면 무시
-                } catch (Exception reflectError) {
-                    getLogger().log(Level.WARNING, "Failed to invoke blacklist save", reflectError);
-                }
-                var f = saveFutureRef.get();
-                if (f != null) {
-                    f.get(2, TimeUnit.SECONDS);
-                }
-            } catch (Exception ignored) {
+                blacklistManager.saveSync();
+            } catch (Exception e) {
+                getLogger().log(Level.WARNING, "Failed to save blacklist on shutdown", e);
             }
         }
 
-        // 데이터 소스 종료 동기 대기
         if (dataSource != null) {
             try {
-                dataSource.close().toCompletableFuture().get(3, TimeUnit.SECONDS);
+                dataSource.close().get(3, TimeUnit.SECONDS);
             } catch (Exception e) {
-                getLogger().log(Level.WARNING, "DataSource close timeout or error", e);
+                getLogger().log(Level.WARNING, "Data source close timeout or error", e);
             }
         }
 
-        // 리소스 빌더 종료
-        ResourceFileCreator.shutdown();
+        if (resourcePackBuilder != null) {
+            try {
+                resourcePackBuilder.shutdown();
+            } catch (Exception e) {
+                getLogger().log(Level.WARNING, "ResourcePackBuilder shutdown error", e);
+            }
+        }
 
-        // 플러그인 전용 I O 실행기 종료
-        ioExecutor.shutdown();
-        try {
-            if (!ioExecutor.awaitTermination(3, TimeUnit.SECONDS)) {
+        if (ioExecutor != null) {
+            ioExecutor.shutdown();
+            try {
+                if (!ioExecutor.awaitTermination(3, TimeUnit.SECONDS)) {
+                    ioExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
                 ioExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
             }
-        } catch (InterruptedException e) {
-            ioExecutor.shutdownNow();
-            Thread.currentThread().interrupt();
         }
 
-        getLogger().info(() -> "DamageDisplay disabled cleanly.");
+        getLogger().info("DamageDisplay disabled");
     }
 
-    public void saveSkin(UUID uuid, int skinIndex) {
-        playerSkins.put(uuid, skinIndex);
-        dataSource.savePlayerSkin(uuid, skinIndex);
-    }
-
-    public int getPlayerSkin(UUID uuid) {
-        return playerSkins.getOrDefault(uuid, 0);
-    }
-
-    public void loadPlayerSkinData(UUID uuid) {
-        dataSource.loadPlayerSkin(uuid).thenAcceptAsync(
-                skinIndex -> playerSkins.put(uuid, skinIndex),
-                command -> Bukkit.getScheduler().runTask(this, command)
+    private void setupIoExecutor() {
+        this.ioExecutor = new ThreadPoolExecutor(
+                2,
+                4,
+                60L,
+                TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(),
+                r -> {
+                    Thread t = new Thread(r);
+                    t.setName("DamageDisplay-IO");
+                    t.setDaemon(true);
+                    return t;
+                }
         );
     }
 
-    public void unloadPlayerSkinData(UUID uuid) {
-        playerSkins.remove(uuid);
-    }
-
-    public boolean isEntityBlacklisted(EntityType type) {
-        return blacklistManager != null && blacklistManager.isBlacklisted(type);
-    }
-
     private void initDataSource() {
-        String storageType = getConfig().getString("storage.type", "YAML");
-        String normalized = storageType == null ? "YAML" : storageType.toUpperCase();
+        FileConfiguration cfg = getConfig();
+        String type = cfg.getString("storage.type", "YAML");
+        String normalized = type == null ? "YAML" : type.trim().toUpperCase();
 
         switch (normalized) {
-            case "MYSQL":
-                dataSource = new MySQLDataSource(this);
-                break;
-            case "SQLITE":
-                dataSource = new SQLiteDataSource(this);
-                break;
-            case "YAML":
-            default:
-                if (!"YAML".equals(normalized)) {
-                    getLogger().warning(() -> "Invalid storage type '" + normalized + "'. Defaulting to YAML.");
-                }
-                dataSource = new YamlDataSource(this);
-                break;
+            case "MYSQL" -> dataSource = new MySQLDataSource(this, ioExecutor);
+            case "SQLITE" -> dataSource = new SQLiteDataSource(this, ioExecutor);
+            case "YAML" -> dataSource = new YamlDataSource(this, ioExecutor);
+            default -> {
+                getLogger().warning("Unknown storage type " + normalized + " defaulting to YAML");
+                dataSource = new YamlDataSource(this, ioExecutor);
+                normalized = "YAML";
+            }
         }
 
-        getLogger().info(() -> "Using " + normalized + " for data storage.");
-        dataSource.connect().exceptionally(ex -> {
-            getLogger().log(Level.SEVERE, "[Storage] Connect failed", ex);
-            return false;
-        });
+        getLogger().info("Using " + normalized + " storage backend");
+
+        try {
+            boolean ok = dataSource.connect().get(10, TimeUnit.SECONDS);
+            if (!ok) {
+                getLogger().severe("Failed to connect storage backend");
+            }
+        } catch (Exception e) {
+            getLogger().log(Level.SEVERE, "Storage connect failed", e);
+        }
     }
 
     private void loadMobOffsets() {
         mobOffsets.clear();
-        File offsetsFile = new File(getDataFolder(), "mob-offsets.yml");
-        if (!offsetsFile.exists()) saveResource("mob-offsets.yml", false);
-
-        FileConfiguration cfg = YamlConfiguration.loadConfiguration(offsetsFile);
-        for (String key : cfg.getKeys(false)) {
-            double x = cfg.getDouble(key + ".x", 0.0);
-            double y = cfg.getDouble(key + ".y", 2.0);
-            double z = cfg.getDouble(key + ".z", 0.0);
-            mobOffsets.put(key, new Vector(x, y, z));
+        File file = new File(getDataFolder(), "mob-offsets.yml");
+        if (!file.exists()) {
+            saveResource("mob-offsets.yml", false);
         }
-        getLogger().info(() -> "Loaded " + mobOffsets.size() + " custom mob offsets.");
-    }
 
-    public Map<String, Vector> getMobOffsets() {
-        return mobOffsets;
-    }
+        FileConfiguration cfg = YamlConfiguration.loadConfiguration(file);
+        for (String key : cfg.getKeys(false)) {
+            try {
+                EntityType type = EntityType.valueOf(key.toUpperCase());
+                double x = cfg.getDouble(key + ".x", 0.0);
+                double y = cfg.getDouble(key + ".y", 1.5);
+                double z = cfg.getDouble(key + ".z", 0.0);
+                mobOffsets.put(type, new Vector(x, y, z));
+            } catch (IllegalArgumentException e) {
+                getLogger().warning("Invalid entity type in mob-offsets.yml " + key);
+            }
+        }
 
-    public int getMaxSkinIndex() {
-        return maxSkinIndex;
+        getLogger().info("Loaded " + mobOffsets.size() + " mob offsets");
     }
 
     private void updateMaxSkinIndex() {
@@ -210,66 +180,110 @@ public class DamageDisplay extends JavaPlugin {
         }
 
         int max = 0;
-        File[] files = dir.listFiles((f, n) -> n.startsWith("normal") && n.endsWith(".png"));
+        File[] files = dir.listFiles((f, name) -> name.startsWith("normal") && name.endsWith(".png"));
         if (files != null) {
-            for (File file : files) {
-                String name = file.getName();
-                int len = name.length();
-                int val = 0;
+            for (File f : files) {
+                String name = f.getName();
+                int value = 0;
                 boolean hasDigit = false;
-                for (int i = 0; i < len; i++) {
+                for (int i = 0; i < name.length(); i++) {
                     char c = name.charAt(i);
                     if (c >= '0' && c <= '9') {
                         hasDigit = true;
-                        val = val * 10 + (c - '0');
+                        value = value * 10 + (c - '0');
                     }
                 }
-                if (hasDigit && val > max) max = val;
+                if (hasDigit && value > max) {
+                    max = value;
+                }
             }
         }
         maxSkinIndex = max;
-        int finalMax = max;
-        getLogger().info(() -> "Max damage skin index cached: " + finalMax);
+        getLogger().info("Max damage skin index " + maxSkinIndex);
     }
 
     public void reloadPlugin() {
         reloadConfig();
+        loadMobOffsets();
+        updateMaxSkinIndex();
+
         if (renderer != null) {
             try {
                 renderer.removeAll();
             } catch (Throwable t) {
-                getLogger().log(Level.WARNING, "Renderer cleanup error on reload", t);
+                getLogger().log(Level.WARNING, "Renderer cleanup on reload error", t);
             }
         }
-
-        loadMobOffsets();
-        updateMaxSkinIndex();
-
-        try {
-            // 저장 요청 후 새 매니저로 교체
-            if (blacklistManager != null) {
-                var m = BlacklistManager.class.getMethod("saveIfDirtyAsync");
-                var ret = m.invoke(blacklistManager);
-                if (ret instanceof CompletableFuture) {
-                    //noinspection unchecked
-                    ((CompletableFuture<Void>) ret).get(2, TimeUnit.SECONDS);
-                }
-            }
-        } catch (Exception ignored) {
-        }
-
-        blacklistManager = new BlacklistManager(this, getDataFolder());
         renderer = new DamageDisplayRendererImpl(this);
 
-        getLogger().info(() -> "DamageDisplay fully reloaded.");
+        if (blacklistManager != null) {
+            try {
+                blacklistManager.saveSync();
+            } catch (Exception e) {
+                getLogger().log(Level.WARNING, "Blacklist save on reload error", e);
+            }
+        }
+        blacklistManager = new BlacklistManager(this, new File(getDataFolder(), "blacklist.yml"));
+
+        getLogger().info("DamageDisplay reloaded");
+    }
+
+    public ExecutorService getIoExecutor() {
+        return ioExecutor;
+    }
+
+    public IDataSource getDataSource() {
+        return dataSource;
     }
 
     public BlacklistManager getBlacklistManager() {
         return blacklistManager;
     }
 
-    // 외부 리스너에서 사용할 전용 I O 실행기 접근자
-    public ExecutorService getIoExecutor() {
-        return ioExecutor;
+    public boolean isEntityBlacklisted(EntityType type) {
+        return blacklistManager != null && blacklistManager.isBlacklisted(type);
+    }
+
+    public void saveSkin(UUID uuid, int skinIndex) {
+        playerSkins.put(uuid, skinIndex);
+        if (dataSource != null) {
+            dataSource.savePlayerSkin(uuid, skinIndex);
+        }
+    }
+
+    public int getPlayerSkin(UUID uuid) {
+        return playerSkins.getOrDefault(uuid, 0);
+    }
+
+    public void loadPlayerSkinData(UUID uuid) {
+        if (dataSource == null) {
+            playerSkins.put(uuid, 0);
+            return;
+        }
+        dataSource.loadPlayerSkin(uuid).thenAccept(skin -> {
+            Bukkit.getScheduler().runTask(this, () -> playerSkins.put(uuid, skin));
+        });
+    }
+
+    public void unloadPlayerSkinData(UUID uuid) {
+        playerSkins.remove(uuid);
+    }
+
+    public Vector getMobOffset(org.bukkit.entity.Entity entity) {
+        EntityType type = entity.getType();
+        Vector custom = mobOffsets.get(type);
+        if (custom != null) {
+            return custom;
+        }
+        double h = entity.getHeight();
+        return new Vector(0.0, h * 0.8 + 0.3, 0.0);
+    }
+
+    public int getMaxSkinIndex() {
+        return maxSkinIndex;
+    }
+
+    public ResourcePackBuilder getResourcePackBuilder() {
+        return resourcePackBuilder;
     }
 }

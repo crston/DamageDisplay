@@ -6,53 +6,67 @@ import io.lumine.mythic.api.skills.SkillCaster;
 import io.lumine.mythic.bukkit.BukkitAdapter;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
-import org.bukkit.*;
-import org.bukkit.entity.*;
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.Color;
+import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
+import org.bukkit.World;
+import org.bukkit.entity.ArmorStand;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.TextDisplay;
+import org.bukkit.entity.Player;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.scheduler.BukkitRunnable;
-import org.bukkit.util.Vector;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * DamageDisplayRendererImpl - Ultra-Lean Edition (극한 성능 버전)
- * 모든 엔티티와 객체를 재활용하며, GC 오버헤드는 사실상 0에 수렴함.
- */
 public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
 
     private final DamageDisplay plugin;
     private final boolean useTextDisplay;
     private final NamespacedKey tagKey;
 
-    // 고정 메모리 풀
-    private final ArrayDeque<AnimatedDisplay> activeDisplays = new ArrayDeque<>(512);
-    private final ArrayDeque<AnimatedDisplay> pool = new ArrayDeque<>(256);
+    private final List<AnimatedDisplay> activeDisplays = new ArrayList<>(512);
     private final Map<String, Key> fontKeyCache = new ConcurrentHashMap<>();
 
-    private static final double RENDER_DISTANCE_SQUARED = 4096.0;
-    private static final int MAX_TICKS = 12;
-    private static final int UPDATE_INTERVAL = 2; // 2tick마다 업데이트
+    private static final double RENDER_DISTANCE_SQ = 4096.0;
+
+    private static final int MAX_TICKS = 10;        // 더 빠르게 사라지도록
+    private static final int UPDATE_INTERVAL = 1;  // 매 tick 업데이트
 
     public DamageDisplayRendererImpl(DamageDisplay plugin) {
         this.plugin = plugin;
         this.useTextDisplay = isTextDisplaySupported();
-        this.tagKey = new NamespacedKey(plugin, "display_entity");
+        this.tagKey = new NamespacedKey(plugin, "damage_display");
         startAnimationTask();
     }
 
     @Override
-    public void display(Location loc, int damage, boolean critical, int skin,
-                        double ox, double oy, double oz) {
-        if (damage <= 0 || loc.getWorld() == null) return;
+    public void display(Location location, int damage, boolean critical, int skinIndex,
+                        double offsetX, double offsetY, double offsetZ) {
+        if (damage <= 0) {
+            return;
+        }
+        World world = location.getWorld();
+        if (world == null) {
+            return;
+        }
 
-        Location displayLoc = loc.clone().add(ox, oy, oz);
+        Location loc = location.clone().add(offsetX, offsetY, offsetZ);
 
-        if (useTextDisplay) spawnTextDisplay(displayLoc, damage, critical, skin);
-        else spawnArmorStand(displayLoc, damage, critical, skin);
+        if (useTextDisplay) {
+            spawnTextDisplay(loc, damage, critical, skinIndex);
+        } else {
+            spawnArmorStand(loc, damage, critical, skinIndex);
+        }
     }
 
-    private void spawnTextDisplay(Location loc, int damage, boolean critical, int skin) {
+    private void spawnTextDisplay(Location loc, int damage, boolean critical, int skinIndex) {
         TextDisplay display = loc.getWorld().spawn(loc, TextDisplay.class, d -> {
             d.setBillboard(TextDisplay.Billboard.CENTER);
             d.setShadowed(false);
@@ -61,14 +75,15 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
             d.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
             d.setTextOpacity((byte) 255);
             d.getPersistentDataContainer().set(tagKey, PersistentDataType.INTEGER, 1);
-            d.text(buildComponent(damage, critical, skin));
+            d.text(buildComponent(damage, critical, skinIndex));
         });
 
-        AnimatedDisplay ad = (pool.isEmpty()) ? new AnimatedDisplay(display) : pool.pop().reset(display);
-        activeDisplays.addLast(ad);
+        synchronized (activeDisplays) {
+            activeDisplays.add(new AnimatedDisplay(display));
+        }
     }
 
-    private void spawnArmorStand(Location loc, int damage, boolean critical, int skin) {
+    private void spawnArmorStand(Location loc, int damage, boolean critical, int skinIndex) {
         ArmorStand stand = loc.getWorld().spawn(loc, ArmorStand.class, s -> {
             s.setVisible(false);
             s.setGravity(false);
@@ -76,43 +91,22 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
             s.setMarker(true);
             s.setCustomNameVisible(true);
             try {
-                s.customName(buildComponent(damage, critical, skin));
-            } catch (Throwable ignored) {
-                s.setCustomName(String.valueOf(damage));
+                s.customName(buildComponent(damage, critical, skinIndex));
+            } catch (Throwable t) {
+                s.setCustomName(Integer.toString(damage));
             }
         });
-        plugin.getServer().getScheduler().runTaskLater(plugin, stand::remove, MAX_TICKS);
+
+        synchronized (activeDisplays) {
+            activeDisplays.add(new AnimatedDisplay(stand));
+        }
     }
 
-    private Component buildComponent(int damage, boolean critical, int skin) {
-        String fontName = (critical ? "critical" : "normal") + skin;
+    private Component buildComponent(int damage, boolean critical, int skinIndex) {
+        int clampedSkin = Math.max(0, Math.min(skinIndex, plugin.getMaxSkinIndex()));
+        String fontName = (critical ? "critical" : "normal") + clampedSkin;
         Key key = fontKeyCache.computeIfAbsent(fontName, f -> Key.key("damagedisplay", f));
         return Component.text(Integer.toString(damage)).font(key);
-    }
-
-    private void startAnimationTask() {
-        new BukkitRunnable() {
-            int tick = 0;
-
-            @Override
-            public void run() {
-                tick++;
-                if (activeDisplays.isEmpty()) return;
-                if (tick % UPDATE_INTERVAL != 0) return; // 2tick마다만 이동
-
-                int size = activeDisplays.size();
-                for (int i = 0; i < size; i++) {
-                    AnimatedDisplay ad = activeDisplays.pollFirst();
-                    if (ad == null) continue;
-                    if (ad.update()) {
-                        if (ad.entity.isValid()) ad.entity.remove();
-                        pool.offer(ad); // 재사용
-                    } else {
-                        activeDisplays.offerLast(ad);
-                    }
-                }
-            }
-        }.runTaskTimer(plugin, 0L, 1L);
     }
 
     private boolean isTextDisplaySupported() {
@@ -125,76 +119,125 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
     }
 
     private boolean isCritical(Entity damager) {
-        if (Bukkit.getPluginManager().isPluginEnabled("MythicMobs") && damager instanceof LivingEntity livingDamager) {
-            try {
-                SkillCaster caster = MythicProvider.get().getSkillManager().getCaster(BukkitAdapter.adapt(livingDamager));
-                if (caster != null && caster.hasAura("critical")) {
-                    return true;
-                }
-            } catch (Exception ignored) {}
+        if (!Bukkit.getPluginManager().isPluginEnabled("MythicMobs")) {
+            return false;
+        }
+        if (!(damager instanceof LivingEntity living)) {
+            return false;
+        }
+        try {
+            SkillCaster caster = MythicProvider.get().getSkillManager().getCaster(BukkitAdapter.adapt(living));
+            if (caster != null && caster.hasAura("critical")) {
+                return true;
+            }
+        } catch (Exception ignored) {
         }
         return false;
     }
 
-    public DamageData getDamageData(Entity damager, Entity victim) {
-        int skin = 0;
+    public DamageData buildDamageData(Entity damager, Entity victim, double baseDamage) {
+        int skinIndex = 0;
         boolean critical = isCritical(damager);
-
         if (damager instanceof Player player) {
-            skin = plugin.getPlayerSkin(player.getUniqueId());
+            skinIndex = plugin.getPlayerSkin(player.getUniqueId());
         }
 
-        Vector offsetVec = getOffset(victim);
+        var offsetVec = plugin.getMobOffset(victim);
         double[] offset = {offsetVec.getX(), offsetVec.getY(), offsetVec.getZ()};
-        return new DamageData(critical, skin, offset);
+        return new DamageData(critical, skinIndex, offset, baseDamage);
     }
 
-    private Vector getOffset(Entity entity) {
-        String name = getEntityTypeName(entity);
-        Vector custom = plugin.getMobOffsets().get(name);
-        if (custom != null) return custom.clone();
-        return new Vector(0, entity.getHeight() * 0.8 + 0.5, 0);
+    private void startAnimationTask() {
+        new BukkitRunnable() {
+            int tick = 0;
+
+            @Override
+            public void run() {
+                tick++;
+                if (tick % UPDATE_INTERVAL != 0) {
+                    return;
+                }
+
+                synchronized (activeDisplays) {
+                    if (activeDisplays.isEmpty()) {
+                        return;
+                    }
+
+                    for (int i = activeDisplays.size() - 1; i >= 0; i--) {
+                        AnimatedDisplay ad = activeDisplays.get(i);
+                        if (ad == null) {
+                            activeDisplays.remove(i);
+                            continue;
+                        }
+
+                        if (updateDisplay(ad)) {
+                            activeDisplays.remove(i);
+                        }
+                    }
+                }
+            }
+        }.runTaskTimer(plugin, 1L, 1L);
     }
 
-    private String getEntityTypeName(Entity entity) {
-        if (entity.getCustomName() != null) return ChatColor.stripColor(entity.getCustomName());
-        return entity.getType().name();
+    private boolean updateDisplay(AnimatedDisplay ad) {
+        Entity entity = ad.entity;
+        if (entity == null || !entity.isValid()) {
+            return true;
+        }
+
+        if (ad.age++ >= MAX_TICKS) {
+            entity.remove();
+            return true;
+        }
+
+        Location loc = entity.getLocation();
+        World world = loc.getWorld();
+        if (world == null) {
+            entity.remove();
+            return true;
+        }
+
+        boolean anyViewer = world.getPlayers().stream()
+                .anyMatch(p -> p.getLocation().distanceSquared(loc) <= RENDER_DISTANCE_SQ);
+
+        if (!anyViewer) {
+            entity.remove();
+            return true;
+        }
+
+        ad.velocityY -= 0.03;
+        loc.add(0.0, ad.velocityY, 0.0);
+        entity.teleport(loc);
+
+        return false;
     }
 
     @Override
     public void removeAll() {
-        while (!activeDisplays.isEmpty()) {
-            AnimatedDisplay d = activeDisplays.poll();
-            if (d != null && d.entity.isValid()) d.entity.remove();
-            pool.offer(d);
+        synchronized (activeDisplays) {
+            for (AnimatedDisplay ad : activeDisplays) {
+                if (ad != null && ad.entity != null && ad.entity.isValid()) {
+                    ad.entity.remove();
+                }
+            }
+            activeDisplays.clear();
         }
     }
 
-    private static class AnimatedDisplay {
-        private TextDisplay entity;
-        private double velocityY;
-        private int age;
+    private static final class AnimatedDisplay {
+        final Entity entity;
+        double velocityY = 0.22;   // 더 빠르게 상승
+        int age = 0;
 
-        AnimatedDisplay(TextDisplay entity) {
-            reset(entity);
-        }
-
-        AnimatedDisplay reset(TextDisplay newEntity) {
-            this.entity = newEntity;
-            this.velocityY = 0.1;
-            this.age = 0;
-            return this;
-        }
-
-        boolean update() {
-            if (!entity.isValid() || age++ >= MAX_TICKS) return true;
-            Location loc = entity.getLocation();
-            loc.add(0, velocityY, 0);
-            entity.teleport(loc);
-            velocityY -= 0.02;
-            return false;
+        AnimatedDisplay(Entity entity) {
+            this.entity = entity;
         }
     }
 
-    public record DamageData(boolean isCritical, int skinIndex, double[] offset) {}
+    public record DamageData(boolean critical, int skinIndex, double[] offset, double baseDamage) {
+    }
+
+    private String stripColor(String text) {
+        return ChatColor.stripColor(text);
+    }
 }

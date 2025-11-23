@@ -10,12 +10,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.logging.Level;
 
-/**
- * PlayerConnectionListener - Java 21 극한 최적화 버전
- * - Virtual Thread Executor 기반 완전 비블로킹 로드/저장
- * - 예외 처리 및 로깅 최적화
- * - 스레드 점유 최소화
- */
 public final class PlayerConnectionListener implements Listener {
 
     private final DamageDisplay plugin;
@@ -25,29 +19,20 @@ public final class PlayerConnectionListener implements Listener {
     }
 
     @EventHandler
-    public void onPlayerJoin(PlayerJoinEvent event) {
-        final UUID uuid = event.getPlayer().getUniqueId();
-
-        // Virtual Thread I/O → 메인 스레드 완전 비블로킹
+    public void onJoin(PlayerJoinEvent event) {
+        UUID uuid = event.getPlayer().getUniqueId();
         CompletableFuture.runAsync(() -> {
             try {
                 plugin.loadPlayerSkinData(uuid);
             } catch (Exception e) {
-                plugin.getLogger().log(Level.WARNING, "[PlayerData] Failed to load skin for " + uuid, e);
+                plugin.getLogger().log(Level.WARNING, "Failed to load skin for " + uuid, e);
             }
         }, plugin.getIoExecutor());
     }
 
     @EventHandler
-    public void onPlayerQuit(PlayerQuitEvent event) {
-        final UUID uuid = event.getPlayer().getUniqueId();
-
-        CompletableFuture.runAsync(() -> {
-            try {
-                plugin.unloadPlayerSkinData(uuid);
-            } catch (Exception e) {
-                plugin.getLogger().log(Level.WARNING, "[PlayerData] Failed to unload skin for " + uuid, e);
-            }
-        }, plugin.getIoExecutor());
+    public void onQuit(PlayerQuitEvent event) {
+        UUID uuid = event.getPlayer().getUniqueId();
+        plugin.unloadPlayerSkinData(uuid);
     }
 }

@@ -2,6 +2,7 @@ package com.gmail.bobason01.command;
 
 import com.gmail.bobason01.DamageDisplay;
 import com.gmail.bobason01.blacklist.BlacklistManager;
+import com.gmail.bobason01.util.ResourcePackBuilder;
 import org.bukkit.Bukkit;
 import org.bukkit.command.*;
 import org.bukkit.entity.EntityType;
@@ -10,69 +11,69 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
 
-/**
- * DamageDisplayCommand
- * - Java 21 기반 극한 성능 최적화 버전
- * - 불필요한 객체 생성 최소화 및 분기 효율화
- */
 public final class DamageDisplayCommand implements TabExecutor {
 
     private static final String PERM_SET_OTHERS = "damagedisplay.set.others";
     private static final String PERM_BLACKLIST = "damagedisplay.blacklist";
-    private static final String PREFIX = "[DamageDisplay] ";
+    private static final String PERM_RESOURCE = "damagedisplay.resource";
 
-    private static final List<String> SUBCOMMANDS = List.of("reload", "set", "blacklist");
+    private static final List<String> ROOT_SUBS = List.of("reload", "set", "blacklist", "resourcebuild");
     private static final List<String> BLACKLIST_SUBS = List.of("add", "remove", "list");
-    private static final List<String> SKIN_INDICES = List.of("0", "1", "2", "3");
-    private static final List<String> EMPTY_LIST = Collections.emptyList();
-
-    // entityName → EntityType 캐시
-    private static final Map<String, EntityType> ENTITY_NAME_TO_TYPE = new HashMap<>();
-    static {
-        for (EntityType type : EntityType.values()) {
-            ENTITY_NAME_TO_TYPE.put(type.name().toLowerCase(Locale.ENGLISH), type);
-        }
-    }
 
     private final DamageDisplay plugin;
     private final BlacklistManager blacklistManager;
+    private final Map<String, EntityType> entityNameCache = new TreeMap<>();
 
-    public DamageDisplayCommand(@NotNull DamageDisplay plugin) {
-        this.plugin = Objects.requireNonNull(plugin, "plugin must not be null");
+    public DamageDisplayCommand(DamageDisplay plugin) {
+        this.plugin = plugin;
         this.blacklistManager = plugin.getBlacklistManager();
+
+        for (EntityType type : EntityType.values()) {
+            entityNameCache.put(type.name().toLowerCase(Locale.ROOT), type);
+        }
 
         PluginCommand cmd = plugin.getCommand("damagedisplay");
         if (cmd != null) {
             cmd.setExecutor(this);
             cmd.setTabCompleter(this);
         } else {
-            plugin.getLogger().warning("[DamageDisplayCommand] Command 'damagedisplay' not found in plugin.yml");
+            plugin.getLogger().warning("Command damagedisplay not found in plugin.yml");
         }
     }
 
     @Override
-    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
-                             @NotNull String label, @NotNull String[] args) {
+    public boolean onCommand(@NotNull CommandSender sender,
+                             @NotNull Command command,
+                             @NotNull String label,
+                             @NotNull String[] args) {
+
         if (args.length == 0) {
-            sender.sendMessage("Usage: /damagedisplay <reload|set|blacklist>");
+            sendUsage(sender);
             return true;
         }
 
-        final String sub = args[0].toLowerCase(Locale.ENGLISH);
-        return switch (sub) {
-            case "reload" -> handleReload(sender);
-            case "set" -> handleSet(sender, args);
-            case "blacklist" -> handleBlacklist(sender, args);
-            default -> {
-                sender.sendMessage("Unknown subcommand. Use: reload, set, blacklist");
+        return switch (args[0].toLowerCase(Locale.ROOT)) {
+            case "reload"        -> handleReload(sender);
+            case "set"           -> handleSet(sender, args);
+            case "blacklist"     -> handleBlacklist(sender, args);
+            case "resourcebuild" -> handleResourceBuild(sender);
+            default              -> {
+                sendUsage(sender);
                 yield true;
             }
         };
     }
 
+    private void sendUsage(CommandSender sender) {
+        sender.sendMessage("/damagedisplay reload");
+        sender.sendMessage("/damagedisplay set <skinIndex> [player]");
+        sender.sendMessage("/damagedisplay blacklist <add|remove|list> [entityType]");
+        sender.sendMessage("/damagedisplay resourcebuild");
+    }
+
     private boolean handleReload(CommandSender sender) {
         plugin.reloadPlugin();
-        sender.sendMessage(PREFIX + "Reloaded.");
+        sender.sendMessage("DamageDisplay reloaded");
         return true;
     }
 
@@ -86,41 +87,49 @@ public final class DamageDisplayCommand implements TabExecutor {
         try {
             index = Integer.parseInt(args[1]);
         } catch (NumberFormatException e) {
-            sender.sendMessage("Invalid index: must be a number");
+            sender.sendMessage("Skin index must be a number");
+            return true;
+        }
+
+        if (index < 0 || index > plugin.getMaxSkinIndex()) {
+            sender.sendMessage("Skin index must be between 0 and " + plugin.getMaxSkinIndex());
             return true;
         }
 
         final Player target;
+
         if (args.length == 3) {
             if (!sender.hasPermission(PERM_SET_OTHERS)) {
-                sender.sendMessage("You do not have permission to change other players' skins.");
+                sender.sendMessage("No permission to change other players' skins");
                 return true;
             }
             target = Bukkit.getPlayerExact(args[2]);
             if (target == null) {
-                sender.sendMessage("Player not found: " + args[2]);
+                sender.sendMessage("Player not found");
                 return true;
             }
-        } else if (sender instanceof Player p) {
-            target = p;
         } else {
-            sender.sendMessage("Please specify a player name when using this command from the console.");
-            return true;
+            if (!(sender instanceof Player p)) {
+                sender.sendMessage("Must specify player when using from console");
+                return true;
+            }
+            target = p;
         }
 
         if (index > 0 && !target.hasPermission("damagedisplay.skin." + index)) {
-            sender.sendMessage(target.getName() + " does not have permission for skin " + index + ".");
+            sender.sendMessage("Player does not have permission for skin " + index);
             return true;
         }
 
         plugin.saveSkin(target.getUniqueId(), index);
         sender.sendMessage("Set damage skin of " + target.getName() + " to " + index);
+
         return true;
     }
 
     private boolean handleBlacklist(CommandSender sender, String[] args) {
         if (!sender.hasPermission(PERM_BLACKLIST)) {
-            sender.sendMessage("You lack permission for blacklist management.");
+            sender.sendMessage("No permission for blacklist");
             return true;
         }
 
@@ -129,64 +138,102 @@ public final class DamageDisplayCommand implements TabExecutor {
             return true;
         }
 
-        final String action = args[1].toLowerCase(Locale.ENGLISH);
-        switch (action) {
+        String action = args[1].toLowerCase(Locale.ROOT);
+
+        return switch (action) {
+
             case "list" -> {
-                var blacklisted = blacklistManager.getBlacklisted();
-                if (blacklisted.isEmpty()) {
-                    sender.sendMessage("Blacklisted Entities: none");
-                    return true;
+                var set = blacklistManager.getBlacklisted();
+                if (set.isEmpty()) {
+                    sender.sendMessage("Blacklist is empty");
+                } else {
+                    String joined = String.join(", ",
+                            set.stream().map(Enum::name).sorted().toList());
+                    sender.sendMessage("Blacklisted: " + joined);
                 }
-                StringJoiner joiner = new StringJoiner(", ", "Blacklisted Entities: ", "");
-                for (EntityType type : blacklisted) joiner.add(type.name());
-                sender.sendMessage(joiner.toString());
-                return true;
+                yield true;
             }
+
             case "add", "remove" -> {
                 if (args.length < 3) {
-                    sender.sendMessage("Specify entity type for add/remove.");
-                    return true;
+                    sender.sendMessage("Specify entity type");
+                    yield true;
                 }
 
-                EntityType type = ENTITY_NAME_TO_TYPE.get(args[2].toLowerCase(Locale.ENGLISH));
+                EntityType type = entityNameCache.get(args[2].toLowerCase(Locale.ROOT));
                 if (type == null) {
-                    sender.sendMessage("Invalid entity type: " + args[2]);
-                    return true;
+                    sender.sendMessage("Invalid entity type");
+                    yield true;
                 }
 
                 if (action.equals("add")) {
-                    blacklistManager.addToBlacklist(type);
-                    sender.sendMessage("Added to blacklist: " + type.name());
+                    if (blacklistManager.addToBlacklist(type)) {
+                        sender.sendMessage("Added " + type.name() + " to blacklist");
+                    } else {
+                        sender.sendMessage("Already blacklisted");
+                    }
                 } else {
-                    blacklistManager.removeFromBlacklist(type);
-                    sender.sendMessage("Removed from blacklist: " + type.name());
+                    if (blacklistManager.removeFromBlacklist(type)) {
+                        sender.sendMessage("Removed " + type.name() + " from blacklist");
+                    } else {
+                        sender.sendMessage("Not in blacklist");
+                    }
                 }
-                return true;
+                yield true;
             }
+
             default -> {
                 sender.sendMessage("Usage: /damagedisplay blacklist <add|remove|list> [entityType]");
-                return true;
+                yield true;
             }
+        };
+    }
+
+    private boolean handleResourceBuild(CommandSender sender) {
+        if (!sender.hasPermission(PERM_RESOURCE)) {
+            sender.sendMessage("No permission for resourcebuild");
+            return true;
         }
+
+        ResourcePackBuilder builder = plugin.getResourcePackBuilder();
+        builder.buildAsync();
+
+        sender.sendMessage("Started resource pack build");
+        return true;
     }
 
     @Override
-    public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command,
-                                      @NotNull String alias, @NotNull String[] args) {
-        if (args.length == 1) return SUBCOMMANDS;
+    public List<String> onTabComplete(@NotNull CommandSender sender,
+                                      @NotNull Command command,
+                                      @NotNull String alias,
+                                      @NotNull String[] args) {
 
-        if ("set".equalsIgnoreCase(args[0])) {
-            if (args.length == 2) return SKIN_INDICES;
-            if (args.length == 3) return null; // Bukkit will handle player names
+        if (args.length == 1) {
+            return ROOT_SUBS;
         }
 
-        if ("blacklist".equalsIgnoreCase(args[0])) {
-            if (args.length == 2) return BLACKLIST_SUBS;
-            if (args.length == 3 && ("add".equalsIgnoreCase(args[1]) || "remove".equalsIgnoreCase(args[1]))) {
-                return List.copyOf(ENTITY_NAME_TO_TYPE.keySet());
+        if ("set".equalsIgnoreCase(args[0])) {
+            if (args.length == 2) {
+                int max = plugin.getMaxSkinIndex();
+                List<String> out = new ArrayList<>(max + 1);
+                for (int i = 0; i <= max; i++) out.add(Integer.toString(i));
+                return out;
+            }
+            if (args.length == 3) {
+                return null;
             }
         }
 
-        return EMPTY_LIST;
+        if ("blacklist".equalsIgnoreCase(args[0])) {
+            if (args.length == 2) {
+                return BLACKLIST_SUBS;
+            }
+
+            if (args.length == 3 && ("add".equalsIgnoreCase(args[1]) || "remove".equalsIgnoreCase(args[1]))) {
+                return new ArrayList<>(entityNameCache.keySet());
+            }
+        }
+
+        return Collections.emptyList();
     }
 }
