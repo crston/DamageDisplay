@@ -7,15 +7,16 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class ResourcePackBuilder {
 
     private static final Logger LOGGER = Logger.getLogger(ResourcePackBuilder.class.getName());
-
     private final File dataFolder;
     private final Executor executor;
+    private final AtomicBoolean isBuilding = new AtomicBoolean(false);
 
     public ResourcePackBuilder(File dataFolder, Executor executor) {
         this.dataFolder = dataFolder;
@@ -23,79 +24,80 @@ public final class ResourcePackBuilder {
     }
 
     public void buildAsync() {
+        if (!isBuilding.compareAndSet(false, true)) {
+            LOGGER.warning("Resource pack build is already in progress!");
+            return;
+        }
+
         CompletableFuture.runAsync(this::buildInternal, executor)
-                .exceptionally(ex -> {
-                    LOGGER.log(Level.SEVERE, "Resource pack build failed", ex);
-                    return null;
+                .whenComplete((result, ex) -> {
+                    isBuilding.set(false);
+                    if (ex != null) {
+                        LOGGER.log(Level.SEVERE, "Resource pack build failed", ex);
+                    }
                 });
     }
 
     private void buildInternal() {
+        File buildRoot = new File(dataFolder, "build");
         File imagesDir = new File(dataFolder, "images");
-        File texturesDir = new File(dataFolder, "build/assets/damagedisplay/textures/font");
-        File fontsDir = new File(dataFolder, "build/assets/damagedisplay/font");
-        File buildDir = new File(dataFolder, "build");
+        File texturesDir = new File(buildRoot, "assets/damagedisplay/textures/font");
+        File fontsDir = new File(buildRoot, "assets/damagedisplay/font");
 
         createDir(imagesDir);
         createDir(texturesDir);
         createDir(fontsDir);
-        createDir(buildDir);
+        createDir(buildRoot);
 
         try {
             copyImages(imagesDir, texturesDir);
-
             int maxIndex = detectMaxIndex(texturesDir);
+
             if (maxIndex < 0) {
-                LOGGER.warning("No normal images found under " + texturesDir.getAbsolutePath());
+                LOGGER.warning("No images found in /images folder or no valid normal index detected.");
                 return;
             }
 
             FontUtil.generateFontJsonRange(fontsDir, 0, maxIndex, executor).join();
-            createPackMcmeta(buildDir);
+            createPackMcmeta(buildRoot);
 
-            LOGGER.info("Resource pack build completed count " + (maxIndex + 1));
+            LOGGER.info("Resource pack build completed. Max Index: " + maxIndex);
+            LOGGER.info("Check directory: " + fontsDir.getAbsolutePath());
         } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Error during internal build process", e);
             throw new RuntimeException(e);
         }
     }
 
     private void createDir(File dir) {
         if (!dir.exists() && !dir.mkdirs()) {
-            LOGGER.warning("Could not create dir " + dir.getAbsolutePath());
+            LOGGER.warning("Could not create directory: " + dir.getAbsolutePath());
         }
     }
 
     private void copyImages(File from, File to) throws IOException {
         File[] pngs = from.listFiles((f, name) -> name.endsWith(".png"));
-        if (pngs == null) {
-            return;
-        }
+        if (pngs == null) return;
         for (File src : pngs) {
-            Path s = src.toPath();
-            Path d = to.toPath().resolve(src.getName());
-            Files.copy(s, d, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+            Files.copy(src.toPath(), to.toPath().resolve(src.getName()), StandardCopyOption.REPLACE_EXISTING);
         }
     }
 
     private int detectMaxIndex(File texturesDir) {
         int max = -1;
         File[] files = texturesDir.listFiles((f, name) -> name.startsWith("normal") && name.endsWith(".png"));
-        if (files == null) {
-            return -1;
-        }
+        if (files == null) return -1;
+
         for (File f : files) {
             String name = f.getName();
-            int value = 0;
-            boolean hasDigit = false;
-            for (int i = 0; i < name.length(); i++) {
-                char c = name.charAt(i);
-                if (c >= '0' && c <= '9') {
-                    hasDigit = true;
-                    value = value * 10 + (c - '0');
+            try {
+                String numStr = name.replaceAll("[^0-9]", "");
+                if (!numStr.isEmpty()) {
+                    int value = Integer.parseInt(numStr);
+                    if (value > max) max = value;
                 }
-            }
-            if (hasDigit && value > max) {
-                max = value;
+            } catch (NumberFormatException e) {
+                LOGGER.warning("Could not parse index from filename: " + name);
             }
         }
         return max;
@@ -107,22 +109,14 @@ public final class ResourcePackBuilder {
                 {
                   "pack": {
                     "pack_format": 18,
-                    "description": "DamageDisplay Auto Generated Fonts"
+                    "description": "DamageDisplay Auto Generated"
                   }
                 }
                 """;
-
         try (FileOutputStream out = new FileOutputStream(file)) {
-            byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
-            out.write(bytes);
-            out.flush();
-            out.getFD().sync();
+            out.write(json.getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
             LOGGER.log(Level.SEVERE, "Failed to write pack.mcmeta", e);
         }
-    }
-
-    public void shutdown() {
-        // nothing to do here because executor is owned by plugin
     }
 }

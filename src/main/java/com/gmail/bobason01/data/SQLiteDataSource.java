@@ -35,13 +35,8 @@ public final class SQLiteDataSource implements IDataSource {
                 cfg.setJdbcUrl("jdbc:sqlite:" + dbFile.getAbsolutePath());
                 cfg.setPoolName("DamageDisplay-SQLite");
                 cfg.setMaximumPoolSize(4);
-                cfg.setMinimumIdle(1);
-                cfg.setConnectionTimeout(8000);
-                cfg.setMaxLifetime(1800000);
-                cfg.setIdleTimeout(300000);
 
                 dataSource = new HikariDataSource(cfg);
-
                 createTable();
                 plugin.getLogger().info("SQLite pool initialized");
                 return true;
@@ -65,13 +60,8 @@ public final class SQLiteDataSource implements IDataSource {
     @Override
     public CompletableFuture<Void> close() {
         return CompletableFuture.runAsync(() -> {
-            try {
-                if (dataSource != null && !dataSource.isClosed()) {
-                    dataSource.close();
-                    plugin.getLogger().info("SQLite pool closed");
-                }
-            } catch (Exception e) {
-                plugin.getLogger().log(Level.WARNING, "SQLite close error", e);
+            if (dataSource != null && !dataSource.isClosed()) {
+                dataSource.close();
             }
         }, executor);
     }
@@ -84,12 +74,10 @@ public final class SQLiteDataSource implements IDataSource {
                  PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, uuid.toString());
                 try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        return rs.getInt(1);
-                    }
+                    if (rs.next()) return rs.getInt(1);
                 }
             } catch (SQLException e) {
-                plugin.getLogger().log(Level.SEVERE, "SQLite load failed for " + uuid, e);
+                plugin.getLogger().log(Level.SEVERE, "SQLite load failed", e);
             }
             return 0;
         }, executor);
@@ -106,7 +94,7 @@ public final class SQLiteDataSource implements IDataSource {
                 ps.setInt(2, skinIndex);
                 ps.executeUpdate();
             } catch (SQLException e) {
-                plugin.getLogger().log(Level.SEVERE, "SQLite save failed for " + uuid, e);
+                plugin.getLogger().log(Level.SEVERE, "SQLite save failed", e);
             }
         }, executor);
     }

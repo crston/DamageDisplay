@@ -7,105 +7,159 @@ import io.lumine.mythic.bukkit.BukkitAdapter;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
-import org.bukkit.entity.ArmorStand;
-import org.bukkit.entity.Entity;
-import org.bukkit.entity.LivingEntity;
-import org.bukkit.entity.TextDisplay;
-import org.bukkit.entity.Player;
+import org.bukkit.entity.*;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.persistence.PersistentDataType;
-import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.util.Transformation;
+import org.bukkit.util.Vector;
+import org.joml.AxisAngle4f;
+import org.joml.Vector3f;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 
 public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
 
     private final DamageDisplay plugin;
     private final boolean useTextDisplay;
     private final NamespacedKey tagKey;
-
-    private final List<AnimatedDisplay> activeDisplays = new ArrayList<>(512);
     private final Map<String, Key> fontKeyCache = new ConcurrentHashMap<>();
-
-    private static final double RENDER_DISTANCE_SQ = 4096.0;
-
-    private static final int MAX_TICKS = 10;        // 더 빠르게 사라지도록
-    private static final int UPDATE_INTERVAL = 1;  // 매 tick 업데이트
+    private final Map<UUID, Long> lastRenderTimes = new ConcurrentHashMap<>();
 
     public DamageDisplayRendererImpl(DamageDisplay plugin) {
         this.plugin = plugin;
         this.useTextDisplay = isTextDisplaySupported();
         this.tagKey = new NamespacedKey(plugin, "damage_display");
-        startAnimationTask();
+    }
+
+    public void displayWithThrottling(Entity victim, Location location, int damage, boolean critical, int skinIndex, double ox, double oy, double oz) {
+        if (damage <= 0 || location.getWorld() == null) return;
+
+        long now = System.currentTimeMillis();
+        UUID victimId = victim.getUniqueId();
+        if (lastRenderTimes.getOrDefault(victimId, 0L) > now - 50) return;
+        lastRenderTimes.put(victimId, now);
+
+        Location loc = location.clone().add(ox, oy, oz);
+        loc.add((ThreadLocalRandom.current().nextDouble() - 0.5) * 0.3, (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.3, (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.3);
+
+        if (useTextDisplay) spawnOptimizedTextDisplay(loc, damage, critical, skinIndex);
+        else spawnLegacyArmorStand(loc, damage, critical, skinIndex);
     }
 
     @Override
-    public void display(Location location, int damage, boolean critical, int skinIndex,
-                        double offsetX, double offsetY, double offsetZ) {
-        if (damage <= 0) {
-            return;
-        }
-        World world = location.getWorld();
-        if (world == null) {
-            return;
-        }
-
-        Location loc = location.clone().add(offsetX, offsetY, offsetZ);
-
-        if (useTextDisplay) {
-            spawnTextDisplay(loc, damage, critical, skinIndex);
-        } else {
-            spawnArmorStand(loc, damage, critical, skinIndex);
-        }
+    public void display(Location location, int damage, boolean critical, int skinIndex, double ox, double oy, double oz) {
+        if (damage <= 0 || location.getWorld() == null) return;
+        Location loc = location.clone().add(ox, oy, oz);
+        if (useTextDisplay) spawnOptimizedTextDisplay(loc, damage, critical, skinIndex);
+        else spawnLegacyArmorStand(loc, damage, critical, skinIndex);
     }
 
-    private void spawnTextDisplay(Location loc, int damage, boolean critical, int skinIndex) {
-        TextDisplay display = loc.getWorld().spawn(loc, TextDisplay.class, d -> {
-            d.setBillboard(TextDisplay.Billboard.CENTER);
-            d.setShadowed(false);
-            d.setSeeThrough(false);
-            d.setPersistent(false);
-            d.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
-            d.setTextOpacity((byte) 255);
-            d.getPersistentDataContainer().set(tagKey, PersistentDataType.INTEGER, 1);
-            d.text(buildComponent(damage, critical, skinIndex));
+    private void spawnOptimizedTextDisplay(Location loc, int damage, boolean critical, int skinIndex) {
+        int mode = plugin.getAnimationMode();
+        int duration = plugin.getAnimationDuration();
+
+        loc.getWorld().spawn(loc, TextDisplay.class, display -> {
+            display.setBillboard(Display.Billboard.CENTER);
+            display.setShadowed(false);
+            display.setSeeThrough(false);
+            display.setPersistent(false);
+            display.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
+            display.getPersistentDataContainer().set(tagKey, PersistentDataType.INTEGER, 1);
+            display.text(buildComponent(damage, critical, skinIndex));
+
+            setInitialState(display, mode, damage);
+            Bukkit.getScheduler().runTaskLater(plugin, () -> { if (display.isValid()) playAnimation(display, mode, damage, duration); }, 1L);
+            Bukkit.getScheduler().runTaskLater(plugin, () -> { if (display.isValid()) display.remove(); }, duration + 10L);
         });
+    }
 
-        synchronized (activeDisplays) {
-            activeDisplays.add(new AnimatedDisplay(display));
+    private void setInitialState(TextDisplay display, int mode, int damage) {
+        float scale = Math.min(plugin.getScaleMax(), plugin.getScaleBase() + (damage * plugin.getScalePerDamage()));
+        switch (mode) {
+            case 1 -> display.setTransformation(new Transformation(new Vector3f(0, 0, 0), new AxisAngle4f(), new Vector3f(scale, scale, scale), new AxisAngle4f()));
+            case 2 -> display.setTransformation(new Transformation(new Vector3f(0, 0, 0), new AxisAngle4f(), new Vector3f(0.1f, 0.1f, 0.1f), new AxisAngle4f()));
+            case 3 -> display.setTransformation(new Transformation(new Vector3f(0, -0.5f, 0), new AxisAngle4f(), new Vector3f(1.5f, 0.1f, 1.5f), new AxisAngle4f()));
+            case 5 -> display.setTransformation(new Transformation(new Vector3f(0, 3.0f, 0), new AxisAngle4f(), new Vector3f(scale, scale * 2.0f, scale), new AxisAngle4f()));
+            case 6 -> display.setTransformation(new Transformation(new Vector3f(0, 0.2f, 0), new AxisAngle4f(), new Vector3f(1.0f, 1.0f, 1.0f), new AxisAngle4f()));
+            case 7 -> {
+                float side = ThreadLocalRandom.current().nextBoolean() ? -1.0f : 1.0f;
+                display.setTransformation(new Transformation(new Vector3f(side, 0, 0), new AxisAngle4f(), new Vector3f(0.5f, 0.5f, 0.5f), new AxisAngle4f()));
+            }
+            case 9, 10 -> display.setTransformation(new Transformation(new Vector3f(0, 0, 0), new AxisAngle4f(), new Vector3f(scale, scale, scale), new AxisAngle4f()));
+            default -> display.setTransformation(new Transformation(new Vector3f(0, 0, 0), new AxisAngle4f(), new Vector3f(1.0f, 1.0f, 1.0f), new AxisAngle4f()));
         }
     }
 
-    private void spawnArmorStand(Location loc, int damage, boolean critical, int skinIndex) {
+    private void playAnimation(TextDisplay display, int mode, int damage, int duration) {
+        display.setInterpolationDuration(duration);
+        display.setInterpolationDelay(0);
+        float scale = Math.min(plugin.getScaleMax(), plugin.getScaleBase() + (damage * plugin.getScalePerDamage()));
+        switch (mode) {
+            case 1 -> display.setTransformation(new Transformation(new Vector3f(0, 2.0f, 0), new AxisAngle4f(), new Vector3f(scale, scale, scale), new AxisAngle4f()));
+            case 2 -> {
+                ThreadLocalRandom r = ThreadLocalRandom.current();
+                display.setTransformation(new Transformation(new Vector3f((float) (r.nextDouble() - 0.5) * 3, (float) r.nextDouble() * 1.5f + 0.5f, (float) (r.nextDouble() - 0.5) * 3), new AxisAngle4f((float) Math.toRadians(r.nextInt(360)), r.nextFloat(), r.nextFloat(), r.nextFloat()), new Vector3f(1, 1, 1), new AxisAngle4f()));
+            }
+            case 3 -> display.setTransformation(new Transformation(new Vector3f(0, 1.5f, 0), new AxisAngle4f(), new Vector3f(1, 1, 1), new AxisAngle4f()));
+            case 4 -> display.setTransformation(new Transformation(new Vector3f(0, 3.0f, 0), new AxisAngle4f((float) Math.toRadians(1080), 0, 1, 0), new Vector3f(0.1f, 0.1f, 0.1f), new AxisAngle4f()));
+            case 5 -> display.setTransformation(new Transformation(new Vector3f(0, 0.5f, 0), new AxisAngle4f(), new Vector3f(scale, scale, scale), new AxisAngle4f()));
+            case 6 -> display.setTransformation(new Transformation(new Vector3f(0, 2.0f, -0.5f), new AxisAngle4f((float) Math.toRadians(-360), 1, 0, 0), new Vector3f(1.2f, 1.2f, 1.2f), new AxisAngle4f()));
+            case 7 -> {
+                float ex = display.getTransformation().getTranslation().x < 0 ? 1.0f : -1.0f;
+                display.setTransformation(new Transformation(new Vector3f(ex, 1.5f, 0), new AxisAngle4f((float) Math.toRadians(ex > 0 ? 15 : -15), 0, 0, 1), new Vector3f(1.2f, 1.2f, 1.2f), new AxisAngle4f()));
+            }
+            case 8 -> display.setTransformation(new Transformation(new Vector3f(0, 3.5f, 0), new AxisAngle4f(), new Vector3f(scale * 0.5f, scale * 3.0f, scale * 0.5f), new AxisAngle4f()));
+            case 9 -> {
+                int h = duration / 2;
+                display.setInterpolationDuration(h);
+                display.setTransformation(new Transformation(new Vector3f(0, 1.5f, 0), new AxisAngle4f(), new Vector3f(scale, scale, scale), new AxisAngle4f()));
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    if (display.isValid()) {
+                        display.setInterpolationDuration(h);
+                        display.setTransformation(new Transformation(new Vector3f(0, -0.5f, 0), new AxisAngle4f(), new Vector3f(scale * 0.8f, scale * 0.8f, scale * 0.8f), new AxisAngle4f()));
+                    }
+                }, h);
+            }
+            case 10 -> {
+                int rt = (int) (duration * 0.3);
+                int lt = duration - rt;
+                display.setInterpolationDuration(rt);
+                display.setTransformation(new Transformation(new Vector3f(0, 0.4f, 0), new AxisAngle4f(), new Vector3f(scale, scale, scale), new AxisAngle4f()));
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    if (display.isValid()) {
+                        display.setInterpolationDuration(lt);
+                        display.setTransformation(new Transformation(new Vector3f(0, 0.05f, 0), new AxisAngle4f(), new Vector3f(scale, scale, scale), new AxisAngle4f()));
+                    }
+                }, rt);
+            }
+            default -> display.setTransformation(new Transformation(new Vector3f(0, 1.0f, 0), new AxisAngle4f(), new Vector3f(1.2f, 1.2f, 1.2f), new AxisAngle4f()));
+        }
+    }
+
+    private void spawnLegacyArmorStand(Location loc, int damage, boolean critical, int skinIndex) {
         ArmorStand stand = loc.getWorld().spawn(loc, ArmorStand.class, s -> {
             s.setVisible(false);
             s.setGravity(false);
             s.setSmall(true);
             s.setMarker(true);
             s.setCustomNameVisible(true);
-            try {
-                s.customName(buildComponent(damage, critical, skinIndex));
-            } catch (Throwable t) {
-                s.setCustomName(Integer.toString(damage));
-            }
+            s.setCustomName(Integer.toString(damage));
+            s.getPersistentDataContainer().set(tagKey, PersistentDataType.INTEGER, 1);
         });
-
-        synchronized (activeDisplays) {
-            activeDisplays.add(new AnimatedDisplay(stand));
-        }
+        Bukkit.getScheduler().runTaskLater(plugin, stand::remove, plugin.getAnimationDuration());
     }
 
     private Component buildComponent(int damage, boolean critical, int skinIndex) {
-        int clampedSkin = Math.max(0, Math.min(skinIndex, plugin.getMaxSkinIndex()));
-        String fontName = (critical ? "critical" : "normal") + clampedSkin;
-        Key key = fontKeyCache.computeIfAbsent(fontName, f -> Key.key("damagedisplay", f));
+        int clamped = Math.max(0, Math.min(skinIndex, plugin.getMaxSkinIndex()));
+        String name = (critical ? "critical" : "normal") + clamped;
+        Key key = fontKeyCache.computeIfAbsent(name, k -> Key.key("damagedisplay", k));
         return Component.text(Integer.toString(damage)).font(key);
     }
 
@@ -113,131 +167,56 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
         try {
             Class.forName("org.bukkit.entity.TextDisplay");
             return true;
-        } catch (ClassNotFoundException e) {
+        } catch (Exception e) {
             return false;
         }
     }
 
-    private boolean isCritical(Entity damager) {
-        if (!Bukkit.getPluginManager().isPluginEnabled("MythicMobs")) {
-            return false;
-        }
-        if (!(damager instanceof LivingEntity living)) {
-            return false;
-        }
-        try {
-            SkillCaster caster = MythicProvider.get().getSkillManager().getCaster(BukkitAdapter.adapt(living));
-            if (caster != null && caster.hasAura("critical")) {
-                return true;
-            }
-        } catch (Exception ignored) {
-        }
-        return false;
-    }
+    public DamageData buildDamageData(EntityDamageByEntityEvent event, double baseDamage) {
+        Entity damager = event.getDamager();
+        Entity victim = event.getEntity();
+        int skin = 0;
+        if (damager instanceof Player p) skin = plugin.getPlayerSkin(p.getUniqueId());
 
-    public DamageData buildDamageData(Entity damager, Entity victim, double baseDamage) {
-        int skinIndex = 0;
-        boolean critical = isCritical(damager);
-        if (damager instanceof Player player) {
-            skinIndex = plugin.getPlayerSkin(player.getUniqueId());
+        boolean crit = false;
+
+        // 1. MythicMobs Aura 체크 (기존 유지)
+        if (Bukkit.getPluginManager().isPluginEnabled("MythicMobs") && damager instanceof LivingEntity le) {
+            try {
+                SkillCaster sc = MythicProvider.get().getSkillManager().getCaster(BukkitAdapter.adapt(le));
+                if (sc != null && sc.hasAura("critical")) crit = true;
+            } catch (Exception ignored) {}
         }
 
-        var offsetVec = plugin.getMobOffset(victim);
-        double[] offset = {offsetVec.getX(), offsetVec.getY(), offsetVec.getZ()};
-        return new DamageData(critical, skinIndex, offset, baseDamage);
-    }
+        // 2. MythicLib (MMOItems 기반) Critical Check
+        if (!crit && plugin.isUseMMOItemsCritical() && Bukkit.getPluginManager().isPluginEnabled("MythicLib")) {
+            try {
+                io.lumine.mythic.lib.damage.AttackMetadata attackMeta = io.lumine.mythic.lib.MythicLib.plugin.getDamage().findAttack(event);
 
-    private void startAnimationTask() {
-        new BukkitRunnable() {
-            int tick = 0;
-
-            @Override
-            public void run() {
-                tick++;
-                if (tick % UPDATE_INTERVAL != 0) {
-                    return;
-                }
-
-                synchronized (activeDisplays) {
-                    if (activeDisplays.isEmpty()) {
-                        return;
-                    }
-
-                    for (int i = activeDisplays.size() - 1; i >= 0; i--) {
-                        AnimatedDisplay ad = activeDisplays.get(i);
-                        if (ad == null) {
-                            activeDisplays.remove(i);
-                            continue;
-                        }
-
-                        if (updateDisplay(ad)) {
-                            activeDisplays.remove(i);
-                        }
+                if (attackMeta != null) {
+                    io.lumine.mythic.lib.damage.DamageMetadata damageMeta = attackMeta.getDamage();
+                    if (damageMeta.isWeaponCriticalStrike() || damageMeta.isSkillCriticalStrike()) {
+                        crit = true;
                     }
                 }
+            } catch (Throwable ignored) {
+                // 혹시 모를 런타임 에러 방지용
             }
-        }.runTaskTimer(plugin, 1L, 1L);
-    }
-
-    private boolean updateDisplay(AnimatedDisplay ad) {
-        Entity entity = ad.entity;
-        if (entity == null || !entity.isValid()) {
-            return true;
         }
 
-        if (ad.age++ >= MAX_TICKS) {
-            entity.remove();
-            return true;
-        }
-
-        Location loc = entity.getLocation();
-        World world = loc.getWorld();
-        if (world == null) {
-            entity.remove();
-            return true;
-        }
-
-        boolean anyViewer = world.getPlayers().stream()
-                .anyMatch(p -> p.getLocation().distanceSquared(loc) <= RENDER_DISTANCE_SQ);
-
-        if (!anyViewer) {
-            entity.remove();
-            return true;
-        }
-
-        ad.velocityY -= 0.03;
-        loc.add(0.0, ad.velocityY, 0.0);
-        entity.teleport(loc);
-
-        return false;
+        Vector off = plugin.getMobOffset(victim);
+        return new DamageData(crit, skin, new double[]{off.getX(), off.getY(), off.getZ()}, baseDamage);
     }
 
     @Override
     public void removeAll() {
-        synchronized (activeDisplays) {
-            for (AnimatedDisplay ad : activeDisplays) {
-                if (ad != null && ad.entity != null && ad.entity.isValid()) {
-                    ad.entity.remove();
-                }
+        lastRenderTimes.clear();
+        for (World w : Bukkit.getWorlds()) {
+            for (Entity e : w.getEntitiesByClass(TextDisplay.class)) {
+                if (e.getPersistentDataContainer().has(tagKey, PersistentDataType.INTEGER)) e.remove();
             }
-            activeDisplays.clear();
         }
     }
 
-    private static final class AnimatedDisplay {
-        final Entity entity;
-        double velocityY = 0.22;   // 더 빠르게 상승
-        int age = 0;
-
-        AnimatedDisplay(Entity entity) {
-            this.entity = entity;
-        }
-    }
-
-    public record DamageData(boolean critical, int skinIndex, double[] offset, double baseDamage) {
-    }
-
-    private String stripColor(String text) {
-        return ChatColor.stripColor(text);
-    }
+    public record DamageData(boolean critical, int skinIndex, double[] offset, double baseDamage) {}
 }

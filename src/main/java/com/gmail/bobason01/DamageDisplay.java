@@ -1,6 +1,7 @@
 package com.gmail.bobason01;
 
 import com.gmail.bobason01.blacklist.BlacklistManager;
+import com.gmail.bobason01.command.BugReportCommand;
 import com.gmail.bobason01.command.DamageDisplayCommand;
 import com.gmail.bobason01.data.IDataSource;
 import com.gmail.bobason01.data.MySQLDataSource;
@@ -17,6 +18,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.util.Vector;
 
 import java.io.File;
+import java.util.Collections;
+import java.util.EnumMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.*;
@@ -30,20 +33,33 @@ public final class DamageDisplay extends JavaPlugin {
     private ResourcePackBuilder resourcePackBuilder;
 
     private final Map<UUID, Integer> playerSkins = new ConcurrentHashMap<>();
-    private final Map<EntityType, Vector> mobOffsets = new ConcurrentHashMap<>();
+    private final Map<EntityType, Vector> mobOffsets = Collections.synchronizedMap(new EnumMap<>(EntityType.class));
     private int maxSkinIndex = 0;
 
     private ExecutorService ioExecutor;
 
+    private int animationMode;
+    private int animationDuration;
+    private float scaleBase;
+    private float scalePerDamage;
+    private float scaleMax;
+    private boolean useMMOItemsCritical;
+
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        updateConfig();
+        reloadConfig();
+
         setupIoExecutor();
         loadMobOffsets();
+        loadAnimationSettings();
         initDataSource();
-        updateMaxSkinIndex();
 
+        // 리소스팩 빌더 초기화 및 실행
         resourcePackBuilder = new ResourcePackBuilder(getDataFolder(), ioExecutor);
+        getLogger().info("Starting automatic resource pack build process");
+        resourcePackBuilder.buildAsync();
 
         blacklistManager = new BlacklistManager(this, new File(getDataFolder(), "blacklist.yml"));
         renderer = new DamageDisplayRendererImpl(this);
@@ -52,238 +68,141 @@ public final class DamageDisplay extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(new PlayerConnectionListener(this), this);
 
         new DamageDisplayCommand(this);
+        new BugReportCommand(this);
+
+        updateMaxSkinIndex();
 
         getLogger().info("DamageDisplay enabled");
     }
 
     @Override
     public void onDisable() {
-        try {
-            if (renderer != null) {
-                renderer.removeAll();
-            }
-        } catch (Throwable t) {
-            getLogger().log(Level.WARNING, "Renderer cleanup error", t);
-        }
-
-        if (blacklistManager != null) {
-            try {
-                blacklistManager.saveSync();
-            } catch (Exception e) {
-                getLogger().log(Level.WARNING, "Failed to save blacklist on shutdown", e);
-            }
-        }
-
+        if (renderer != null) renderer.removeAll();
+        if (blacklistManager != null) blacklistManager.saveSync();
         if (dataSource != null) {
             try {
                 dataSource.close().get(3, TimeUnit.SECONDS);
             } catch (Exception e) {
-                getLogger().log(Level.WARNING, "Data source close timeout or error", e);
+                getLogger().log(Level.WARNING, "DataSource close warning", e);
             }
         }
-
-        if (resourcePackBuilder != null) {
-            try {
-                resourcePackBuilder.shutdown();
-            } catch (Exception e) {
-                getLogger().log(Level.WARNING, "ResourcePackBuilder shutdown error", e);
-            }
-        }
-
         if (ioExecutor != null) {
             ioExecutor.shutdown();
             try {
-                if (!ioExecutor.awaitTermination(3, TimeUnit.SECONDS)) {
+                if (!ioExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
                     ioExecutor.shutdownNow();
                 }
             } catch (InterruptedException e) {
                 ioExecutor.shutdownNow();
-                Thread.currentThread().interrupt();
             }
         }
+    }
 
-        getLogger().info("DamageDisplay disabled");
+    private void updateConfig() {
+        FileConfiguration cfg = getConfig();
+        boolean changed = false;
+
+        if (!cfg.contains("animation.mode")) { cfg.set("animation.mode", 1); changed = true; }
+        if (!cfg.contains("animation.duration")) { cfg.set("animation.duration", 15); changed = true; }
+        if (!cfg.contains("animation.scaling.base")) { cfg.set("animation.scaling.base", 1.0); changed = true; }
+        if (!cfg.contains("animation.scaling.per-damage")) { cfg.set("animation.scaling.per-damage", 0.05); changed = true; }
+        if (!cfg.contains("animation.scaling.max")) { cfg.set("animation.scaling.max", 4.0); changed = true; }
+        if (!cfg.contains("storage.type")) { cfg.set("storage.type", "YAML"); changed = true; }
+        if (!cfg.contains("compatibility.mmoitems-critical")) { cfg.set("compatibility.mmoitems-critical", false); changed = true; }
+
+        if (changed) saveConfig();
     }
 
     private void setupIoExecutor() {
-        this.ioExecutor = new ThreadPoolExecutor(
-                2,
-                4,
-                60L,
-                TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(),
-                r -> {
-                    Thread t = new Thread(r);
-                    t.setName("DamageDisplay-IO");
-                    t.setDaemon(true);
-                    return t;
-                }
-        );
+        this.ioExecutor = new ThreadPoolExecutor(2, 4, 60L, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), r -> {
+            Thread t = new Thread(r, "DamageDisplay-IO");
+            t.setDaemon(true);
+            return t;
+        });
     }
 
     private void initDataSource() {
+        String type = getConfig().getString("storage.type", "YAML").toUpperCase();
+        dataSource = switch (type) {
+            case "MYSQL" -> new MySQLDataSource(this, ioExecutor);
+            case "SQLITE" -> new SQLiteDataSource(this, ioExecutor);
+            default -> new YamlDataSource(this, ioExecutor);
+        };
+        dataSource.connect().thenAccept(success -> {
+            if (!success) getLogger().severe("Failed to connect to storage");
+        });
+    }
+
+    private void loadAnimationSettings() {
         FileConfiguration cfg = getConfig();
-        String type = cfg.getString("storage.type", "YAML");
-        String normalized = type == null ? "YAML" : type.trim().toUpperCase();
-
-        switch (normalized) {
-            case "MYSQL" -> dataSource = new MySQLDataSource(this, ioExecutor);
-            case "SQLITE" -> dataSource = new SQLiteDataSource(this, ioExecutor);
-            case "YAML" -> dataSource = new YamlDataSource(this, ioExecutor);
-            default -> {
-                getLogger().warning("Unknown storage type " + normalized + " defaulting to YAML");
-                dataSource = new YamlDataSource(this, ioExecutor);
-                normalized = "YAML";
-            }
-        }
-
-        getLogger().info("Using " + normalized + " storage backend");
-
-        try {
-            boolean ok = dataSource.connect().get(10, TimeUnit.SECONDS);
-            if (!ok) {
-                getLogger().severe("Failed to connect storage backend");
-            }
-        } catch (Exception e) {
-            getLogger().log(Level.SEVERE, "Storage connect failed", e);
-        }
+        animationMode = cfg.getInt("animation.mode", 1);
+        animationDuration = cfg.getInt("animation.duration", 15);
+        scaleBase = (float) cfg.getDouble("animation.scaling.base", 1.0);
+        scalePerDamage = (float) cfg.getDouble("animation.scaling.per-damage", 0.05);
+        scaleMax = (float) cfg.getDouble("animation.scaling.max", 3.0);
+        useMMOItemsCritical = cfg.getBoolean("compatibility.mmoitems-critical", false);
     }
 
     private void loadMobOffsets() {
         mobOffsets.clear();
         File file = new File(getDataFolder(), "mob-offsets.yml");
-        if (!file.exists()) {
-            saveResource("mob-offsets.yml", false);
-        }
-
+        if (!file.exists()) saveResource("mob-offsets.yml", false);
         FileConfiguration cfg = YamlConfiguration.loadConfiguration(file);
         for (String key : cfg.getKeys(false)) {
             try {
                 EntityType type = EntityType.valueOf(key.toUpperCase());
-                double x = cfg.getDouble(key + ".x", 0.0);
-                double y = cfg.getDouble(key + ".y", 1.5);
-                double z = cfg.getDouble(key + ".z", 0.0);
-                mobOffsets.put(type, new Vector(x, y, z));
-            } catch (IllegalArgumentException e) {
-                getLogger().warning("Invalid entity type in mob-offsets.yml " + key);
-            }
+                mobOffsets.put(type, new Vector(cfg.getDouble(key + ".x", 0.0), cfg.getDouble(key + ".y", 1.5), cfg.getDouble(key + ".z", 0.0)));
+            } catch (IllegalArgumentException ignored) {}
         }
-
-        getLogger().info("Loaded " + mobOffsets.size() + " mob offsets");
     }
 
-    private void updateMaxSkinIndex() {
+    public void updateMaxSkinIndex() {
         File dir = new File(getDataFolder(), "images");
-        if (!dir.exists() && !dir.mkdirs()) {
-            maxSkinIndex = 0;
-            return;
-        }
-
+        if (!dir.exists()) { dir.mkdirs(); maxSkinIndex = 0; return; }
         int max = 0;
         File[] files = dir.listFiles((f, name) -> name.startsWith("normal") && name.endsWith(".png"));
         if (files != null) {
             for (File f : files) {
                 String name = f.getName();
-                int value = 0;
-                boolean hasDigit = false;
-                for (int i = 0; i < name.length(); i++) {
-                    char c = name.charAt(i);
-                    if (c >= '0' && c <= '9') {
-                        hasDigit = true;
-                        value = value * 10 + (c - '0');
-                    }
-                }
-                if (hasDigit && value > max) {
-                    max = value;
+                String numStr = name.replaceAll("[^0-9]", "");
+                if (!numStr.isEmpty()) {
+                    try {
+                        int val = Integer.parseInt(numStr);
+                        if (val > max) max = val;
+                    } catch (NumberFormatException ignored) {}
                 }
             }
         }
         maxSkinIndex = max;
-        getLogger().info("Max damage skin index " + maxSkinIndex);
     }
 
     public void reloadPlugin() {
         reloadConfig();
+        updateConfig();
+        loadAnimationSettings();
         loadMobOffsets();
         updateMaxSkinIndex();
-
-        if (renderer != null) {
-            try {
-                renderer.removeAll();
-            } catch (Throwable t) {
-                getLogger().log(Level.WARNING, "Renderer cleanup on reload error", t);
-            }
-        }
+        if (renderer != null) renderer.removeAll();
         renderer = new DamageDisplayRendererImpl(this);
-
-        if (blacklistManager != null) {
-            try {
-                blacklistManager.saveSync();
-            } catch (Exception e) {
-                getLogger().log(Level.WARNING, "Blacklist save on reload error", e);
-            }
-        }
-        blacklistManager = new BlacklistManager(this, new File(getDataFolder(), "blacklist.yml"));
-
-        getLogger().info("DamageDisplay reloaded");
+        blacklistManager.load();
+        resourcePackBuilder.buildAsync();
     }
 
-    public ExecutorService getIoExecutor() {
-        return ioExecutor;
-    }
-
-    public IDataSource getDataSource() {
-        return dataSource;
-    }
-
-    public BlacklistManager getBlacklistManager() {
-        return blacklistManager;
-    }
-
-    public boolean isEntityBlacklisted(EntityType type) {
-        return blacklistManager != null && blacklistManager.isBlacklisted(type);
-    }
-
-    public void saveSkin(UUID uuid, int skinIndex) {
-        playerSkins.put(uuid, skinIndex);
-        if (dataSource != null) {
-            dataSource.savePlayerSkin(uuid, skinIndex);
-        }
-    }
-
-    public int getPlayerSkin(UUID uuid) {
-        return playerSkins.getOrDefault(uuid, 0);
-    }
-
-    public void loadPlayerSkinData(UUID uuid) {
-        if (dataSource == null) {
-            playerSkins.put(uuid, 0);
-            return;
-        }
-        dataSource.loadPlayerSkin(uuid).thenAccept(skin -> {
-            Bukkit.getScheduler().runTask(this, () -> playerSkins.put(uuid, skin));
-        });
-    }
-
-    public void unloadPlayerSkinData(UUID uuid) {
-        playerSkins.remove(uuid);
-    }
-
-    public Vector getMobOffset(org.bukkit.entity.Entity entity) {
-        EntityType type = entity.getType();
-        Vector custom = mobOffsets.get(type);
-        if (custom != null) {
-            return custom;
-        }
-        double h = entity.getHeight();
-        return new Vector(0.0, h * 0.8 + 0.3, 0.0);
-    }
-
-    public int getMaxSkinIndex() {
-        return maxSkinIndex;
-    }
-
-    public ResourcePackBuilder getResourcePackBuilder() {
-        return resourcePackBuilder;
-    }
+    public ExecutorService getIoExecutor() { return ioExecutor; }
+    public IDataSource getDataSource() { return dataSource; }
+    public BlacklistManager getBlacklistManager() { return blacklistManager; }
+    public boolean isEntityBlacklisted(EntityType type) { return blacklistManager.isBlacklisted(type); }
+    public void saveSkin(UUID uuid, int index) { playerSkins.put(uuid, index); if (dataSource != null) dataSource.savePlayerSkin(uuid, index); }
+    public int getPlayerSkin(UUID uuid) { return playerSkins.getOrDefault(uuid, 0); }
+    public void loadPlayerSkinData(UUID uuid) { if (dataSource != null) dataSource.loadPlayerSkin(uuid).thenAccept(s -> playerSkins.put(uuid, s)); else playerSkins.put(uuid, 0); }
+    public void unloadPlayerSkinData(UUID uuid) { playerSkins.remove(uuid); }
+    public Vector getMobOffset(org.bukkit.entity.Entity entity) { Vector v = mobOffsets.get(entity.getType()); return v != null ? v : new Vector(0.0, entity.getHeight() * 0.8 + 0.3, 0.0); }
+    public int getMaxSkinIndex() { return maxSkinIndex; }
+    public ResourcePackBuilder getResourcePackBuilder() { return resourcePackBuilder; }
+    public int getAnimationMode() { return animationMode; }
+    public int getAnimationDuration() { return animationDuration; }
+    public float getScaleBase() { return scaleBase; }
+    public float getScalePerDamage() { return scalePerDamage; }
+    public float getScaleMax() { return scaleMax; }
+    public boolean isUseMMOItemsCritical() { return useMMOItemsCritical; }
 }

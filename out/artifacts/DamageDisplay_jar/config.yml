@@ -1,7 +1,0 @@
-display:
-  type: armorstand
-
-blacklist:
-  - TEXT_DISPLAY
-  - ARMOR_STAND
-  - PLAYER

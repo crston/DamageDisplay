@@ -1,4 +1,4 @@
-# 데이터 저장 방식을 선택합니다. (YAML, SQLITE, MYSQL 중 하나)
+# Choose how you want to store your DB (YAML, SQLITE, MYSQL)
 storage:
   type: "SQLITE"
   mysql:
@@ -8,12 +8,52 @@ storage:
     username: "your_username"
     password: "your_password"
 
-# 데미지 표시 유형을 선택합니다. (armor_stand 또는 text_display)
+# Whether to use the critical system for MMOItems (Default: false)
+# If set to true, it detects critical damage caused by MMOItems and displays a dedicated font.
+compatibility:
+  mmoitems-critical: false
+
+# Select the damage display type (armor_stand or text_display)
 display:
   type: "text_display"
 
-# 데미지 표시를 생성하지 않을 엔티티 목록입니다.
+# A list of entities that will not generate damage indicators
 blacklist:
   - "TEXT_DISPLAY"
   - "ARMOR_STAND"
   - "PLAYER"
+
+animation:
+  # 0: Standard - Gently ascend
+  # 1: Pop-Up - Grows rapidly and then floats upward
+  # 2: Tumbling - Spins in all directions and bounces (Explosion-like)
+  # 3: Bounce - Flattens and bounces back with a thud (Jelly-like)
+  # 4: Spiral - Spins rapidly and ascends in place (Magical-like)
+  # 5: Smite - Falls from the sky and lands (Lightning-like)
+  # 6: Backflip - Spins backward and ascends gracefully (Critical-like)
+  # 7: Slash - Quickly slashes diagonally (Swordsman-like)
+  # 8: Ghost - Stretches vertically and quickly ascends (Soul-leaking)
+  # 9: Gravity (Gravity/Arc) - Soars upwards, then falls to the ground in a parabolic arc (like an item drop).
+  # 10: Soft Arc (Parabolic Landing) - Floats slightly upwards, then gently descends, stops (settles) on the ground, and then disappears.
+
+  # 0: Standard (기본) - 부드럽게 상승
+  # 1: Pop-Up (팝업) - 확 커졌다가 위로 둥실 떠오름
+  # 2: Tumbling (파편) - 사방으로 회전하며 튀어 나감 (폭발 느낌)
+  # 3: Bounce (바운스) - 납작해졌다가 팅~ 하고 튀어오름 (젤리 느낌)
+  # 4: Spiral (나선) - 제자리에서 고속 회전하며 상승 (마법 느낌)
+  # 5: Smite (스마이트/찍기) - 하늘에서 뚝 떨어지며 꽂힘 (번개/처형 느낌)
+  # 6: Backflip (백덤블링) - 뒤로 한 바퀴 돌면서 멋지게 상승 (치명타 느낌)
+  # 7: Slash (슬래시/베기) - 대각선으로 빠르게 긋고 지나감 (검사/암살자 느낌)
+  # 8: Ghost (고스트/잔상) - 세로로 길게 늘어나며 빠르게 승천 (영혼이 빠져나가는 느낌)
+  # 9: Gravity (중력/아크) - 위로 솟구쳤다가 포물선을 그리며 바닥으로 떨어짐 (아이템 드랍 느낌)
+  # 10: Soft Arc (포물선 안착) - 살짝 위로 떴다가, 부드럽게 내려와서 바닥에 멈춤(정착) 후 사라짐
+  mode: 0
+
+  # 애니메이션 지속 시간 (틱 단위)
+  duration: 15
+
+  # 크기 설정 (Mode 1, 5, 8 등에서 사용)
+  scaling:
+    base: 0.25
+    per-damage: 0.05
+    max: 1.25

@@ -6,6 +6,8 @@ import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -25,13 +27,12 @@ public final class YamlDataSource implements IDataSource {
         this.executor = executor;
         this.dir = new File(plugin.getDataFolder(), "saves");
         if (!dir.exists() && !dir.mkdirs()) {
-            plugin.getLogger().warning("Could not create saves directory " + dir.getAbsolutePath());
+            plugin.getLogger().warning("Could not create saves directory");
         }
     }
 
     @Override
     public CompletableFuture<Boolean> connect() {
-        plugin.getLogger().info("YamlDataSource is ready");
         return CompletableFuture.completedFuture(true);
     }
 
@@ -44,9 +45,7 @@ public final class YamlDataSource implements IDataSource {
     @Override
     public CompletableFuture<Integer> loadPlayerSkin(UUID uuid) {
         Integer cached = cache.get(uuid);
-        if (cached != null) {
-            return CompletableFuture.completedFuture(cached);
-        }
+        if (cached != null) return CompletableFuture.completedFuture(cached);
 
         return CompletableFuture.supplyAsync(() -> {
             File file = new File(dir, uuid.toString() + ".yml");
@@ -54,17 +53,10 @@ public final class YamlDataSource implements IDataSource {
                 cache.put(uuid, 0);
                 return 0;
             }
-
-            try {
-                FileConfiguration cfg = YamlConfiguration.loadConfiguration(file);
-                int skin = cfg.getInt("damage-skin", 0);
-                cache.put(uuid, skin);
-                return skin;
-            } catch (Exception e) {
-                plugin.getLogger().log(Level.WARNING, "Failed to load yaml for " + uuid, e);
-                cache.put(uuid, 0);
-                return 0;
-            }
+            FileConfiguration cfg = YamlConfiguration.loadConfiguration(file);
+            int skin = cfg.getInt("damage-skin", 0);
+            cache.put(uuid, skin);
+            return skin;
         }, executor);
     }
 
@@ -73,12 +65,14 @@ public final class YamlDataSource implements IDataSource {
         cache.put(uuid, skinIndex);
         return CompletableFuture.runAsync(() -> {
             File file = new File(dir, uuid.toString() + ".yml");
+            File temp = new File(dir, uuid.toString() + ".tmp"); // [개선 1] 원자적 저장
             FileConfiguration cfg = new YamlConfiguration();
             cfg.set("damage-skin", skinIndex);
             try {
-                cfg.save(file);
+                cfg.save(temp);
+                Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
             } catch (IOException e) {
-                plugin.getLogger().log(Level.SEVERE, "Failed to save yaml for " + uuid, e);
+                plugin.getLogger().log(Level.SEVERE, "Failed to save player data: " + uuid, e);
             }
         }, executor);
     }

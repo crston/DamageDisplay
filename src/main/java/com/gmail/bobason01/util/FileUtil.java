@@ -15,8 +15,7 @@ public final class FileUtil {
 
     private static final Logger LOGGER = Logger.getLogger(FileUtil.class.getName());
 
-    private FileUtil() {
-    }
+    private FileUtil() {}
 
     public static CompletableFuture<Void> writeJson(File file, String json, Executor executor) {
         return CompletableFuture.runAsync(() -> {
@@ -26,26 +25,25 @@ public final class FileUtil {
             }
 
             File temp = new File(parent, file.getName() + "." + System.nanoTime() + ".tmp");
-
             try (FileOutputStream out = new FileOutputStream(temp)) {
-                byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
-                out.write(bytes);
+                out.write(json.getBytes(StandardCharsets.UTF_8));
                 out.flush();
                 out.getFD().sync();
             } catch (IOException e) {
-                LOGGER.log(Level.SEVERE, "Failed to write temp json file " + temp.getAbsolutePath(), e);
+                LOGGER.log(Level.SEVERE, "Failed to write temp json file: " + temp.getName(), e);
                 return;
             }
 
             try {
-                Files.move(temp.toPath(), file.toPath(),
-                        StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (IOException e) {
-                LOGGER.log(Level.SEVERE, "Failed to move json file to target " + file.getAbsolutePath(), e);
                 try {
-                    Files.deleteIfExists(temp.toPath());
-                } catch (IOException ignored) {
+                    Files.move(temp.toPath(), file.toPath(),
+                            StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+                } catch (IOException e) {
+                    Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
                 }
+            } catch (IOException e) {
+                LOGGER.log(Level.SEVERE, "Failed to move json file to final destination: " + file.getName(), e);
+                try { Files.deleteIfExists(temp.toPath()); } catch (IOException ignored) {}
             }
         }, executor);
     }

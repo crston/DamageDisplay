@@ -16,7 +16,6 @@ public final class DamageDisplayCommand implements TabExecutor {
     private static final String PERM_SET_OTHERS = "damagedisplay.set.others";
     private static final String PERM_BLACKLIST = "damagedisplay.blacklist";
     private static final String PERM_RESOURCE = "damagedisplay.resource";
-
     private static final List<String> ROOT_SUBS = List.of("reload", "set", "blacklist", "resourcebuild");
     private static final List<String> BLACKLIST_SUBS = List.of("add", "remove", "list");
 
@@ -36,28 +35,22 @@ public final class DamageDisplayCommand implements TabExecutor {
         if (cmd != null) {
             cmd.setExecutor(this);
             cmd.setTabCompleter(this);
-        } else {
-            plugin.getLogger().warning("Command damagedisplay not found in plugin.yml");
         }
     }
 
     @Override
-    public boolean onCommand(@NotNull CommandSender sender,
-                             @NotNull Command command,
-                             @NotNull String label,
-                             @NotNull String[] args) {
-
+    public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command,
+                             @NotNull String label, @NotNull String[] args) {
         if (args.length == 0) {
             sendUsage(sender);
             return true;
         }
-
         return switch (args[0].toLowerCase(Locale.ROOT)) {
-            case "reload"        -> handleReload(sender);
-            case "set"           -> handleSet(sender, args);
-            case "blacklist"     -> handleBlacklist(sender, args);
+            case "reload" -> handleReload(sender);
+            case "set" -> handleSet(sender, args);
+            case "blacklist" -> handleBlacklist(sender, args);
             case "resourcebuild" -> handleResourceBuild(sender);
-            default              -> {
+            default -> {
                 sendUsage(sender);
                 yield true;
             }
@@ -97,7 +90,6 @@ public final class DamageDisplayCommand implements TabExecutor {
         }
 
         final Player target;
-
         if (args.length == 3) {
             if (!sender.hasPermission(PERM_SET_OTHERS)) {
                 sender.sendMessage("No permission to change other players' skins");
@@ -123,7 +115,6 @@ public final class DamageDisplayCommand implements TabExecutor {
 
         plugin.saveSkin(target.getUniqueId(), index);
         sender.sendMessage("Set damage skin of " + target.getName() + " to " + index);
-
         return true;
     }
 
@@ -139,33 +130,27 @@ public final class DamageDisplayCommand implements TabExecutor {
         }
 
         String action = args[1].toLowerCase(Locale.ROOT);
-
         return switch (action) {
-
             case "list" -> {
                 var set = blacklistManager.getBlacklisted();
                 if (set.isEmpty()) {
                     sender.sendMessage("Blacklist is empty");
                 } else {
-                    String joined = String.join(", ",
-                            set.stream().map(Enum::name).sorted().toList());
+                    String joined = String.join(", ", set.stream().map(Enum::name).sorted().toList());
                     sender.sendMessage("Blacklisted: " + joined);
                 }
                 yield true;
             }
-
             case "add", "remove" -> {
                 if (args.length < 3) {
                     sender.sendMessage("Specify entity type");
                     yield true;
                 }
-
                 EntityType type = entityNameCache.get(args[2].toLowerCase(Locale.ROOT));
                 if (type == null) {
                     sender.sendMessage("Invalid entity type");
                     yield true;
                 }
-
                 if (action.equals("add")) {
                     if (blacklistManager.addToBlacklist(type)) {
                         sender.sendMessage("Added " + type.name() + " to blacklist");
@@ -181,7 +166,6 @@ public final class DamageDisplayCommand implements TabExecutor {
                 }
                 yield true;
             }
-
             default -> {
                 sender.sendMessage("Usage: /damagedisplay blacklist <add|remove|list> [entityType]");
                 yield true;
@@ -194,24 +178,16 @@ public final class DamageDisplayCommand implements TabExecutor {
             sender.sendMessage("No permission for resourcebuild");
             return true;
         }
-
         ResourcePackBuilder builder = plugin.getResourcePackBuilder();
         builder.buildAsync();
-
         sender.sendMessage("Started resource pack build");
         return true;
     }
 
     @Override
-    public List<String> onTabComplete(@NotNull CommandSender sender,
-                                      @NotNull Command command,
-                                      @NotNull String alias,
-                                      @NotNull String[] args) {
-
-        if (args.length == 1) {
-            return ROOT_SUBS;
-        }
-
+    public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command,
+                                      @NotNull String alias, @NotNull String[] args) {
+        if (args.length == 1) return ROOT_SUBS;
         if ("set".equalsIgnoreCase(args[0])) {
             if (args.length == 2) {
                 int max = plugin.getMaxSkinIndex();
@@ -219,21 +195,14 @@ public final class DamageDisplayCommand implements TabExecutor {
                 for (int i = 0; i <= max; i++) out.add(Integer.toString(i));
                 return out;
             }
-            if (args.length == 3) {
-                return null;
-            }
+            return null;
         }
-
         if ("blacklist".equalsIgnoreCase(args[0])) {
-            if (args.length == 2) {
-                return BLACKLIST_SUBS;
-            }
-
+            if (args.length == 2) return BLACKLIST_SUBS;
             if (args.length == 3 && ("add".equalsIgnoreCase(args[1]) || "remove".equalsIgnoreCase(args[1]))) {
                 return new ArrayList<>(entityNameCache.keySet());
             }
         }
-
         return Collections.emptyList();
     }
 }

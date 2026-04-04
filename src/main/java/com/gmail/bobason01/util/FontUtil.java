@@ -1,6 +1,8 @@
 package com.gmail.bobason01.util;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.logging.Level;
@@ -10,32 +12,31 @@ public final class FontUtil {
 
     private static final Logger LOGGER = Logger.getLogger(FontUtil.class.getName());
 
-    private FontUtil() {
-    }
+    private FontUtil() {}
 
     public static CompletableFuture<Void> generateFontJsonRange(File outputDir, int start, int end, Executor executor) {
         if (!outputDir.exists() && !outputDir.mkdirs()) {
-            LOGGER.warning("Could not create font dir " + outputDir.getAbsolutePath());
+            LOGGER.warning("Could not create font dir");
         }
 
-        return CompletableFuture.runAsync(() -> {
-            for (int i = start; i <= end; i++) {
-                try {
-                    String normal = buildProviderJson("damagedisplay:font/normal" + i + ".png");
-                    String critical = buildProviderJson("damagedisplay:font/critical" + i + ".png");
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
 
-                    FileUtil.writeJson(new File(outputDir, "normal" + i + ".json"), normal, executor).join();
-                    FileUtil.writeJson(new File(outputDir, "critical" + i + ".json"), critical, executor).join();
-                } catch (Exception e) {
-                    LOGGER.log(Level.WARNING, "Failed to generate font json for index " + i, e);
-                }
-            }
-            LOGGER.info("Generated font json from " + start + " to " + end);
-        }, executor);
+        for (int i = start; i <= end; i++) {
+            final int index = i;
+            String normalJson = buildProviderJson("damagedisplay:font/normal" + index + ".png");
+            String criticalJson = buildProviderJson("damagedisplay:font/critical" + index + ".png");
+
+            File normalFile = new File(outputDir, "normal" + index + ".json");
+            File criticalFile = new File(outputDir, "critical" + index + ".json");
+
+            futures.add(FileUtil.writeJson(normalFile, normalJson, executor));
+            futures.add(FileUtil.writeJson(criticalFile, criticalJson, executor));
+        }
+
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
     }
 
     private static String buildProviderJson(String filePath) {
-        String inner = "{\"type\":\"bitmap\",\"file\":\"" + filePath + "\",\"ascent\":32,\"height\":32,\"chars\":[\"0123456789\"]}";
-        return "{\"providers\":[" + inner + "]}";
+        return "{\"providers\":[{\"type\":\"bitmap\",\"file\":\"" + filePath + "\",\"ascent\":32,\"height\":32,\"chars\":[\"0123456789\"]}]}";
     }
 }
