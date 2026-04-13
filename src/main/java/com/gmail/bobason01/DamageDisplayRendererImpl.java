@@ -30,7 +30,6 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
     private final boolean useTextDisplay;
     private final NamespacedKey tagKey;
     private final Map<String, Key> fontKeyCache = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> lastRenderTimes = new ConcurrentHashMap<>();
 
     public DamageDisplayRendererImpl(DamageDisplay plugin) {
         this.plugin = plugin;
@@ -38,13 +37,9 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
         this.tagKey = new NamespacedKey(plugin, "damage_display");
     }
 
+    // 스로틀링 제한을 해제하여 연속으로 들어오는 커스텀 스킬 데미지가 무시되지 않도록 수정했습니다
     public void displayWithThrottling(Entity victim, Location location, int damage, boolean critical, int skinIndex, double ox, double oy, double oz) {
         if (damage <= 0 || location.getWorld() == null) return;
-
-        long now = System.currentTimeMillis();
-        UUID victimId = victim.getUniqueId();
-        if (lastRenderTimes.getOrDefault(victimId, 0L) > now - 50) return;
-        lastRenderTimes.put(victimId, now);
 
         Location loc = location.clone().add(ox, oy, oz);
         loc.add((ThreadLocalRandom.current().nextDouble() - 0.5) * 0.3, (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.3, (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.3);
@@ -110,7 +105,18 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
             case 3 -> display.setTransformation(new Transformation(new Vector3f(0, 1.5f, 0), new AxisAngle4f(), new Vector3f(1, 1, 1), new AxisAngle4f()));
             case 4 -> display.setTransformation(new Transformation(new Vector3f(0, 3.0f, 0), new AxisAngle4f((float) Math.toRadians(1080), 0, 1, 0), new Vector3f(0.1f, 0.1f, 0.1f), new AxisAngle4f()));
             case 5 -> display.setTransformation(new Transformation(new Vector3f(0, 0.5f, 0), new AxisAngle4f(), new Vector3f(scale, scale, scale), new AxisAngle4f()));
-            case 6 -> display.setTransformation(new Transformation(new Vector3f(0, 2.0f, -0.5f), new AxisAngle4f((float) Math.toRadians(-360), 1, 0, 0), new Vector3f(1.2f, 1.2f, 1.2f), new AxisAngle4f()));
+            case 6 -> {
+                int h = Math.max(1, duration / 2);
+                display.setInterpolationDuration(h);
+                display.setTransformation(new Transformation(new Vector3f(0, 1.0f, -0.25f), new AxisAngle4f((float) Math.toRadians(-170), 1, 0, 0), new Vector3f(1.1f, 1.1f, 1.1f), new AxisAngle4f()));
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    if (display.isValid()) {
+                        display.setInterpolationDelay(0);
+                        display.setInterpolationDuration(Math.max(1, duration - h));
+                        display.setTransformation(new Transformation(new Vector3f(0, 2.0f, -0.5f), new AxisAngle4f((float) Math.toRadians(-350), 1, 0, 0), new Vector3f(1.2f, 1.2f, 1.2f), new AxisAngle4f()));
+                    }
+                }, h);
+            }
             case 7 -> {
                 float ex = display.getTransformation().getTranslation().x < 0 ? 1.0f : -1.0f;
                 display.setTransformation(new Transformation(new Vector3f(ex, 1.5f, 0), new AxisAngle4f((float) Math.toRadians(ex > 0 ? 15 : -15), 0, 0, 1), new Vector3f(1.2f, 1.2f, 1.2f), new AxisAngle4f()));
@@ -122,20 +128,22 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
                 display.setTransformation(new Transformation(new Vector3f(0, 1.5f, 0), new AxisAngle4f(), new Vector3f(scale, scale, scale), new AxisAngle4f()));
                 Bukkit.getScheduler().runTaskLater(plugin, () -> {
                     if (display.isValid()) {
+                        display.setInterpolationDelay(0);
                         display.setInterpolationDuration(h);
                         display.setTransformation(new Transformation(new Vector3f(0, -0.5f, 0), new AxisAngle4f(), new Vector3f(scale * 0.8f, scale * 0.8f, scale * 0.8f), new AxisAngle4f()));
                     }
                 }, h);
             }
             case 10 -> {
-                int rt = (int) (duration * 0.3);
-                int lt = duration - rt;
+                int rt = Math.max(1, (int) (duration * 0.4));
+                int lt = Math.max(1, duration - rt);
                 display.setInterpolationDuration(rt);
-                display.setTransformation(new Transformation(new Vector3f(0, 0.4f, 0), new AxisAngle4f(), new Vector3f(scale, scale, scale), new AxisAngle4f()));
+                display.setTransformation(new Transformation(new Vector3f(0.3f, 1.0f, 0), new AxisAngle4f(), new Vector3f(scale * 1.2f, scale * 1.2f, scale * 1.2f), new AxisAngle4f()));
                 Bukkit.getScheduler().runTaskLater(plugin, () -> {
                     if (display.isValid()) {
+                        display.setInterpolationDelay(0);
                         display.setInterpolationDuration(lt);
-                        display.setTransformation(new Transformation(new Vector3f(0, 0.05f, 0), new AxisAngle4f(), new Vector3f(scale, scale, scale), new AxisAngle4f()));
+                        display.setTransformation(new Transformation(new Vector3f(0.5f, 0.05f, 0), new AxisAngle4f(), new Vector3f(scale, scale, scale), new AxisAngle4f()));
                     }
                 }, rt);
             }
@@ -180,7 +188,6 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
 
         boolean crit = false;
 
-        // 1. MythicMobs Aura 체크 (기존 유지)
         if (Bukkit.getPluginManager().isPluginEnabled("MythicMobs") && damager instanceof LivingEntity le) {
             try {
                 SkillCaster sc = MythicProvider.get().getSkillManager().getCaster(BukkitAdapter.adapt(le));
@@ -188,7 +195,6 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
             } catch (Exception ignored) {}
         }
 
-        // 2. MythicLib (MMOItems 기반) Critical Check
         if (!crit && plugin.isUseMMOItemsCritical() && Bukkit.getPluginManager().isPluginEnabled("MythicLib")) {
             try {
                 io.lumine.mythic.lib.damage.AttackMetadata attackMeta = io.lumine.mythic.lib.MythicLib.plugin.getDamage().findAttack(event);
@@ -200,7 +206,6 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
                     }
                 }
             } catch (Throwable ignored) {
-                // 혹시 모를 런타임 에러 방지용
             }
         }
 
@@ -210,7 +215,6 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
 
     @Override
     public void removeAll() {
-        lastRenderTimes.clear();
         for (World w : Bukkit.getWorlds()) {
             for (Entity e : w.getEntitiesByClass(TextDisplay.class)) {
                 if (e.getPersistentDataContainer().has(tagKey, PersistentDataType.INTEGER)) e.remove();
