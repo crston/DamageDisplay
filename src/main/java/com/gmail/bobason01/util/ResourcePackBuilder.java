@@ -1,5 +1,6 @@
 package com.gmail.bobason01.util;
 
+import com.gmail.bobason01.DamageDisplay;
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -9,23 +10,23 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 
 public final class ResourcePackBuilder {
 
-    private static final Logger LOGGER = Logger.getLogger(ResourcePackBuilder.class.getName());
+    private final DamageDisplay plugin;
     private final Path dataFolder;
     private final Executor executor;
     private final AtomicBoolean isBuilding = new AtomicBoolean(false);
 
-    public ResourcePackBuilder(java.io.File dataFolder, Executor executor) {
-        this.dataFolder = dataFolder.toPath();
+    public ResourcePackBuilder(DamageDisplay plugin, Executor executor) {
+        this.plugin = plugin;
+        this.dataFolder = plugin.getDataFolder().toPath();
         this.executor = executor;
     }
 
     public void buildAsync() {
         if (!isBuilding.compareAndSet(false, true)) {
-            LOGGER.warning("Resource pack build is already in progress");
+            plugin.getLogger().warning("Resource pack build is already in progress");
             return;
         }
 
@@ -33,7 +34,7 @@ public final class ResourcePackBuilder {
                 .whenComplete((result, ex) -> {
                     isBuilding.set(false);
                     if (ex != null) {
-                        LOGGER.log(Level.SEVERE, "Resource pack build failed", ex);
+                        plugin.getLogger().log(Level.SEVERE, "Resource pack build failed", ex);
                     }
                 });
     }
@@ -45,39 +46,31 @@ public final class ResourcePackBuilder {
         Path fontsDir = buildRoot.resolve("assets/damagedisplay/font");
 
         try {
-            createDir(imagesDir);
-            createDir(texturesDir);
-            createDir(fontsDir);
+            if (!Files.exists(imagesDir)) Files.createDirectories(imagesDir);
+            if (!Files.exists(texturesDir)) Files.createDirectories(texturesDir);
+            if (!Files.exists(fontsDir)) Files.createDirectories(fontsDir);
 
             copyImages(imagesDir, texturesDir);
+
+            // normal 과 critical 을 모두 검사하여 최대 인덱스를 파악합니다.
             int maxIndex = detectMaxIndex(texturesDir);
 
             if (maxIndex < 0) {
-                LOGGER.warning("No valid normal index detected in images folder");
+                plugin.getLogger().warning("No valid images found to build resource pack");
                 return;
             }
 
-            // 파일 쓰기 스레드를 쪼개지 않고 현재 백그라운드 스레드에서 일괄 처리합니다
+            // FontUtil 은 내부적으로 normal 과 critical 을 쌍으로 생성합니다.
             FontUtil.generateFontJsonRange(fontsDir, 0, maxIndex);
             createPackMcmeta(buildRoot);
 
-            LOGGER.info("Resource pack build completed Max Index " + maxIndex);
+            plugin.getLogger().info("Successfully built resource pack with Max Index: " + maxIndex);
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error during internal build process", e);
-            throw new RuntimeException(e);
-        }
-    }
-
-    private void createDir(Path dir) throws IOException {
-        if (!Files.exists(dir)) {
-            Files.createDirectories(dir);
+            plugin.getLogger().log(Level.SEVERE, "Internal build error", e);
         }
     }
 
     private void copyImages(Path from, Path to) throws IOException {
-        if (!Files.exists(from)) return;
-
-        // 메모리를 잡아먹는 리스트 업열 대신 디렉토리 스트림을 사용하여 하나씩 바로 복사합니다
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(from, "*.png")) {
             for (Path src : stream) {
                 Files.copy(src, to.resolve(src.getFileName()), StandardCopyOption.REPLACE_EXISTING);
@@ -86,28 +79,23 @@ public final class ResourcePackBuilder {
     }
 
     private int detectMaxIndex(Path texturesDir) throws IOException {
-        if (!Files.exists(texturesDir)) return -1;
-
         int max = -1;
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(texturesDir, "normal*.png")) {
+        // 모든 png 파일을 검사하여 파일명에서 숫자를 추출합니다.
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(texturesDir, "*.png")) {
             for (Path f : stream) {
                 String name = f.getFileName().toString();
+                // "normal0.png" 또는 "critical0.png" 모두 대응
                 int value = fastParseInt(name);
-                if (value > max) {
-                    max = value;
-                }
+                if (value > max) max = value;
             }
         }
         return max;
     }
 
-    // 정규식 쓰지 않고 아스키코드 기반으로 숫자만 광속으로 파싱하는 커스텀 메서드입니다
     private int fastParseInt(String text) {
         int val = 0;
         boolean found = false;
-        int len = text.length();
-
-        for (int i = 0; i < len; i++) {
+        for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             if (c >= '0' && c <= '9') {
                 val = val * 10 + (c - '0');

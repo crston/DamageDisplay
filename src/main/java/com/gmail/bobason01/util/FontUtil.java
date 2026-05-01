@@ -13,14 +13,29 @@ public final class FontUtil {
             Files.createDirectories(outputDir);
         }
 
-        // 반복문 안에서 매번 객체를 생성하지 않도록 뼈대 문자열을 미리 만들어둡니다
-        String prefix = "{\"providers\":[{\"type\":\"bitmap\",\"file\":\"damagedisplay:font/";
-        String suffix = "\",\"ascent\":32,\"height\":32,\"chars\":[\"1234567890\"]}]}";
-
+        // normal0.json, critical0.json 등을 각각 생성함
         for (int i = start; i <= end; i++) {
-            // 스트링 빌더를 통한 최적화된 문자열 결합 후 즉각적인 디스크 쓰기를 수행합니다
-            FileUtil.writeFastJson(outputDir.resolve("normal" + i + ".json"), prefix + "normal" + i + ".png" + suffix);
-            FileUtil.writeFastJson(outputDir.resolve("critical" + i + ".json"), prefix + "critical" + i + ".png" + suffix);
+            writeFontFile(outputDir, "normal", i);
+            writeFontFile(outputDir, "critical", i);
         }
+    }
+
+    private static void writeFontFile(Path outputDir, String type, int index) throws IOException {
+        String fileName = type + index + ".json";
+        String textureName = type + index + ".png";
+
+        String json = "{\n" +
+                "  \"providers\": [\n" +
+                "    {\n" +
+                "      \"type\": \"bitmap\",\n" +
+                "      \"file\": \"damagedisplay:font/" + textureName + "\",\n" +
+                "      \"ascent\": 32,\n" +
+                "      \"height\": 32,\n" +
+                "      \"chars\": [\"1234567890\"]\n" +
+                "    }\n" +
+                "  ]\n" +
+                "}";
+
+        FileUtil.writeFastJson(outputDir.resolve(fileName), json);
     }
 }

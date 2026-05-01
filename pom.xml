@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.gmail.bobason01</groupId>
     <artifactId>DamageDisplay</artifactId>
-    <version>30.0</version>
+    <version>50.0</version>
     <name>DamageDisplay</name>
 
     <properties>

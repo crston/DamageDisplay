@@ -10,16 +10,16 @@ import com.gmail.bobason01.data.YamlDataSource;
 import com.gmail.bobason01.listener.EntityDamageListener;
 import com.gmail.bobason01.listener.PlayerConnectionListener;
 import com.gmail.bobason01.util.ResourcePackBuilder;
+import io.lumine.mythic.bukkit.MythicBukkit;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.util.Vector;
 
 import java.io.File;
-import java.util.Collections;
-import java.util.EnumMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.*;
@@ -33,7 +33,7 @@ public final class DamageDisplay extends JavaPlugin {
     private ResourcePackBuilder resourcePackBuilder;
 
     private final Map<UUID, Integer> playerSkins = new ConcurrentHashMap<>();
-    private final Map<EntityType, Vector> mobOffsets = Collections.synchronizedMap(new EnumMap<>(EntityType.class));
+    private final Map<String, Vector> mobOffsets = new ConcurrentHashMap<>();
     private int maxSkinIndex = 0;
 
     private ExecutorService ioExecutor;
@@ -43,7 +43,6 @@ public final class DamageDisplay extends JavaPlugin {
     private float scaleBase;
     private float scalePerDamage;
     private float scaleMax;
-    private boolean useMMOItemsCritical;
 
     @Override
     public void onEnable() {
@@ -56,9 +55,8 @@ public final class DamageDisplay extends JavaPlugin {
         loadAnimationSettings();
         initDataSource();
 
-        // 리소스팩 빌더 초기화 및 실행
-        resourcePackBuilder = new ResourcePackBuilder(getDataFolder(), ioExecutor);
-        getLogger().info("Starting automatic resource pack build process");
+        resourcePackBuilder = new ResourcePackBuilder(this, ioExecutor);
+        updateMaxSkinIndex();
         resourcePackBuilder.buildAsync();
 
         blacklistManager = new BlacklistManager(this, new File(getDataFolder(), "blacklist.yml"));
@@ -67,10 +65,13 @@ public final class DamageDisplay extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(new EntityDamageListener(this, renderer), this);
         Bukkit.getPluginManager().registerEvents(new PlayerConnectionListener(this), this);
 
-        new DamageDisplayCommand(this);
-        new BugReportCommand(this);
+        if (getCommand("damagedisplay") != null) {
+            new DamageDisplayCommand(this);
+        }
 
-        updateMaxSkinIndex();
+        if (getCommand("crston") != null) {
+            new BugReportCommand(this);
+        }
 
         getLogger().info("DamageDisplay enabled");
     }
@@ -101,15 +102,12 @@ public final class DamageDisplay extends JavaPlugin {
     private void updateConfig() {
         FileConfiguration cfg = getConfig();
         boolean changed = false;
-
         if (!cfg.contains("animation.mode")) { cfg.set("animation.mode", 1); changed = true; }
         if (!cfg.contains("animation.duration")) { cfg.set("animation.duration", 15); changed = true; }
-        if (!cfg.contains("animation.scaling.base")) { cfg.set("animation.scaling.base", 1.0); changed = true; }
+        if (!cfg.contains("animation.scaling.base")) { cfg.set("animation.scaling.base", 0.25); changed = true; }
         if (!cfg.contains("animation.scaling.per-damage")) { cfg.set("animation.scaling.per-damage", 0.05); changed = true; }
-        if (!cfg.contains("animation.scaling.max")) { cfg.set("animation.scaling.max", 4.0); changed = true; }
+        if (!cfg.contains("animation.scaling.max")) { cfg.set("animation.scaling.max", 1.25); changed = true; }
         if (!cfg.contains("storage.type")) { cfg.set("storage.type", "YAML"); changed = true; }
-        if (!cfg.contains("compatibility.mmoitems-critical")) { cfg.set("compatibility.mmoitems-critical", false); changed = true; }
-
         if (changed) saveConfig();
     }
 
@@ -137,22 +135,22 @@ public final class DamageDisplay extends JavaPlugin {
         FileConfiguration cfg = getConfig();
         animationMode = cfg.getInt("animation.mode", 1);
         animationDuration = cfg.getInt("animation.duration", 15);
-        scaleBase = (float) cfg.getDouble("animation.scaling.base", 1.0);
+        scaleBase = (float) cfg.getDouble("animation.scaling.base", 0.25);
         scalePerDamage = (float) cfg.getDouble("animation.scaling.per-damage", 0.05);
-        scaleMax = (float) cfg.getDouble("animation.scaling.max", 3.0);
-        useMMOItemsCritical = cfg.getBoolean("compatibility.mmoitems-critical", false);
+        scaleMax = (float) cfg.getDouble("animation.scaling.max", 1.25);
     }
 
-    private void loadMobOffsets() {
+    public void loadMobOffsets() {
         mobOffsets.clear();
         File file = new File(getDataFolder(), "mob-offsets.yml");
         if (!file.exists()) saveResource("mob-offsets.yml", false);
         FileConfiguration cfg = YamlConfiguration.loadConfiguration(file);
         for (String key : cfg.getKeys(false)) {
-            try {
-                EntityType type = EntityType.valueOf(key.toUpperCase());
-                mobOffsets.put(type, new Vector(cfg.getDouble(key + ".x", 0.0), cfg.getDouble(key + ".y", 1.5), cfg.getDouble(key + ".z", 0.0)));
-            } catch (IllegalArgumentException ignored) {}
+            mobOffsets.put(key.toLowerCase(), new Vector(
+                    cfg.getDouble(key + ".x", 0.0),
+                    cfg.getDouble(key + ".y", 1.5),
+                    cfg.getDouble(key + ".z", 0.0)
+            ));
         }
     }
 
@@ -160,20 +158,27 @@ public final class DamageDisplay extends JavaPlugin {
         File dir = new File(getDataFolder(), "images");
         if (!dir.exists()) { dir.mkdirs(); maxSkinIndex = 0; return; }
         int max = 0;
-        File[] files = dir.listFiles((f, name) -> name.startsWith("normal") && name.endsWith(".png"));
+        File[] files = dir.listFiles((f, name) -> name.endsWith(".png"));
         if (files != null) {
             for (File f : files) {
                 String name = f.getName();
-                String numStr = name.replaceAll("[^0-9]", "");
-                if (!numStr.isEmpty()) {
-                    try {
-                        int val = Integer.parseInt(numStr);
-                        if (val > max) max = val;
-                    } catch (NumberFormatException ignored) {}
-                }
+                int val = extractNumber(name);
+                if (val > max) max = val;
             }
         }
-        maxSkinIndex = max;
+        this.maxSkinIndex = max;
+    }
+
+    private int extractNumber(String text) {
+        int val = 0;
+        boolean found = false;
+        for (char c : text.toCharArray()) {
+            if (c >= '0' && c <= '9') {
+                val = val * 10 + (c - '0');
+                found = true;
+            }
+        }
+        return found ? val : -1;
     }
 
     public void reloadPlugin() {
@@ -188,21 +193,30 @@ public final class DamageDisplay extends JavaPlugin {
         resourcePackBuilder.buildAsync();
     }
 
+    public Vector getMobOffset(Entity entity) {
+        if (Bukkit.getPluginManager().isPluginEnabled("MythicMobs")) {
+            var mmInst = MythicBukkit.inst().getMobManager().getMythicMobInstance(entity);
+            if (mmInst != null) {
+                Vector v = mobOffsets.get(mmInst.getType().getInternalName().toLowerCase());
+                if (v != null) return v;
+            }
+        }
+        Vector v = mobOffsets.get(entity.getType().name().toLowerCase());
+        return v != null ? v : new Vector(0.0, entity.getHeight() * 0.85, 0.0);
+    }
+
     public ExecutorService getIoExecutor() { return ioExecutor; }
-    public IDataSource getDataSource() { return dataSource; }
-    public BlacklistManager getBlacklistManager() { return blacklistManager; }
-    public boolean isEntityBlacklisted(EntityType type) { return blacklistManager.isBlacklisted(type); }
-    public void saveSkin(UUID uuid, int index) { playerSkins.put(uuid, index); if (dataSource != null) dataSource.savePlayerSkin(uuid, index); }
     public int getPlayerSkin(UUID uuid) { return playerSkins.getOrDefault(uuid, 0); }
+    public void saveSkin(UUID uuid, int index) { playerSkins.put(uuid, index); if (dataSource != null) dataSource.savePlayerSkin(uuid, index); }
     public void loadPlayerSkinData(UUID uuid) { if (dataSource != null) dataSource.loadPlayerSkin(uuid).thenAccept(s -> playerSkins.put(uuid, s)); else playerSkins.put(uuid, 0); }
     public void unloadPlayerSkinData(UUID uuid) { playerSkins.remove(uuid); }
-    public Vector getMobOffset(org.bukkit.entity.Entity entity) { Vector v = mobOffsets.get(entity.getType()); return v != null ? v : new Vector(0.0, entity.getHeight() * 0.8 + 0.3, 0.0); }
-    public int getMaxSkinIndex() { return maxSkinIndex; }
+    public BlacklistManager getBlacklistManager() { return blacklistManager; }
     public ResourcePackBuilder getResourcePackBuilder() { return resourcePackBuilder; }
+    public int getMaxSkinIndex() { return maxSkinIndex; }
     public int getAnimationMode() { return animationMode; }
     public int getAnimationDuration() { return animationDuration; }
     public float getScaleBase() { return scaleBase; }
     public float getScalePerDamage() { return scalePerDamage; }
     public float getScaleMax() { return scaleMax; }
-    public boolean isUseMMOItemsCritical() { return useMMOItemsCritical; }
+    public boolean isEntityBlacklisted(EntityType type) { return blacklistManager.isBlacklisted(type); }
 }
