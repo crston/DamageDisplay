@@ -16,6 +16,10 @@ compatibility:
 # Select the damage display type (armor_stand or text_display)
 display:
   type: "text_display"
+  # true: 리소스팩 없이 기본 폰트의 숫자 0~9를 표시합니다.
+  # false (기본값): 리소스팩의 커스텀 폰트를 사용합니다.
+  # 변경 후 /damagedisplay reload로 적용합니다.
+  no-resource-pack: false
 
 # A list of entities that will not generate damage indicators
 blacklist:

@@ -1,6 +1,7 @@
 package com.gmail.bobason01.command;
 
 import com.gmail.bobason01.DamageDisplay;
+import com.gmail.bobason01.api.DamageDisplayAPI;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.command.Command;

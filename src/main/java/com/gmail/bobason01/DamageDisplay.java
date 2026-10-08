@@ -1,5 +1,6 @@
 package com.gmail.bobason01;
 
+import com.gmail.bobason01.api.DamageDisplayAPI;
 import com.gmail.bobason01.blacklist.BlacklistManager;
 import com.gmail.bobason01.command.BugReportCommand;
 import com.gmail.bobason01.command.DamageDisplayCommand;
@@ -38,6 +39,7 @@ public final class DamageDisplay extends JavaPlugin {
 
     private ExecutorService ioExecutor;
 
+    private volatile boolean noResourcePack;
     private int animationMode;
     private int animationDuration;
     private float scaleBase;
@@ -53,11 +55,14 @@ public final class DamageDisplay extends JavaPlugin {
         setupIoExecutor();
         loadMobOffsets();
         loadAnimationSettings();
+
+        DamageDisplayAPI.init(this);
+
         initDataSource();
 
         resourcePackBuilder = new ResourcePackBuilder(this, ioExecutor);
         updateMaxSkinIndex();
-        resourcePackBuilder.buildAsync();
+        if (!noResourcePack) resourcePackBuilder.buildAsync();
 
         blacklistManager = new BlacklistManager(this, new File(getDataFolder(), "blacklist.yml"));
         renderer = new DamageDisplayRendererImpl(this);
@@ -73,7 +78,7 @@ public final class DamageDisplay extends JavaPlugin {
             new BugReportCommand(this);
         }
 
-        getLogger().info("DamageDisplay enabled");
+        getLogger().info("Varus Online Zero 데미지 디스플레이 시스템이 활성화되었습니다");
     }
 
     @Override
@@ -84,7 +89,7 @@ public final class DamageDisplay extends JavaPlugin {
             try {
                 dataSource.close().get(3, TimeUnit.SECONDS);
             } catch (Exception e) {
-                getLogger().log(Level.WARNING, "DataSource close warning", e);
+                getLogger().log(Level.WARNING, "데이터 소스 종료 오류", e);
             }
         }
         if (ioExecutor != null) {
@@ -102,6 +107,7 @@ public final class DamageDisplay extends JavaPlugin {
     private void updateConfig() {
         FileConfiguration cfg = getConfig();
         boolean changed = false;
+        if (!cfg.contains("display.no-resource-pack", true)) { cfg.set("display.no-resource-pack", false); changed = true; }
         if (!cfg.contains("animation.mode")) { cfg.set("animation.mode", 1); changed = true; }
         if (!cfg.contains("animation.duration")) { cfg.set("animation.duration", 15); changed = true; }
         if (!cfg.contains("animation.scaling.base")) { cfg.set("animation.scaling.base", 0.25); changed = true; }
@@ -127,12 +133,13 @@ public final class DamageDisplay extends JavaPlugin {
             default -> new YamlDataSource(this, ioExecutor);
         };
         dataSource.connect().thenAccept(success -> {
-            if (!success) getLogger().severe("Failed to connect to storage");
+            if (!success) getLogger().severe("데이터베이스 연결 실패");
         });
     }
 
     private void loadAnimationSettings() {
         FileConfiguration cfg = getConfig();
+        noResourcePack = cfg.getBoolean("display.no-resource-pack", false);
         animationMode = cfg.getInt("animation.mode", 1);
         animationDuration = cfg.getInt("animation.duration", 15);
         scaleBase = (float) cfg.getDouble("animation.scaling.base", 0.25);
@@ -190,7 +197,7 @@ public final class DamageDisplay extends JavaPlugin {
         if (renderer != null) renderer.removeAll();
         renderer = new DamageDisplayRendererImpl(this);
         blacklistManager.load();
-        resourcePackBuilder.buildAsync();
+        if (!noResourcePack) resourcePackBuilder.buildAsync();
     }
 
     public Vector getMobOffset(Entity entity) {
@@ -213,10 +220,12 @@ public final class DamageDisplay extends JavaPlugin {
     public BlacklistManager getBlacklistManager() { return blacklistManager; }
     public ResourcePackBuilder getResourcePackBuilder() { return resourcePackBuilder; }
     public int getMaxSkinIndex() { return maxSkinIndex; }
+    public boolean isNoResourcePack() { return noResourcePack; }
     public int getAnimationMode() { return animationMode; }
     public int getAnimationDuration() { return animationDuration; }
     public float getScaleBase() { return scaleBase; }
     public float getScalePerDamage() { return scalePerDamage; }
     public float getScaleMax() { return scaleMax; }
     public boolean isEntityBlacklisted(EntityType type) { return blacklistManager.isBlacklisted(type); }
+    public DamageDisplayRendererImpl getRenderer() { return renderer; }
 }

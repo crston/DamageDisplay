@@ -1,10 +1,13 @@
 package com.gmail.bobason01;
 
 import com.gmail.bobason01.util.DamageDisplayRenderer;
+import com.gmail.bobason01.util.SchedulerUtil;
 import io.lumine.mythic.api.MythicProvider;
 import io.lumine.mythic.bukkit.BukkitAdapter;
+import io.lumine.mythic.bukkit.MythicBukkit;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Color;
 import org.bukkit.Location;
@@ -24,6 +27,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
 
+    private static final Key DEFAULT_FONT = Key.key("minecraft", "default");
     private final DamageDisplay plugin;
     private final boolean useTextDisplay;
     private final NamespacedKey tagKey;
@@ -39,13 +43,17 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
         if (damage <= 0 || location.getWorld() == null) return;
         Location loc = location.clone().add(ox, oy, oz);
         loc.add((ThreadLocalRandom.current().nextDouble() - 0.5) * 0.25, 0, (ThreadLocalRandom.current().nextDouble() - 0.5) * 0.25);
-        display(loc, damage, critical, skinIndex, 0, 0, 0);
+        spawnDisplay(loc, damage, critical, skinIndex);
     }
 
     @Override
     public void display(Location location, int damage, boolean critical, int skinIndex, double ox, double oy, double oz) {
         if (damage <= 0 || location.getWorld() == null) return;
         Location loc = location.clone().add(ox, oy, oz);
+        spawnDisplay(loc, damage, critical, skinIndex);
+    }
+
+    private void spawnDisplay(Location loc, int damage, boolean critical, int skinIndex) {
         if (useTextDisplay) spawnTextDisplay(loc, damage, critical, skinIndex);
         else spawnLegacyArmorStand(loc, damage, critical);
     }
@@ -63,10 +71,12 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
             display.text(buildComponent(damage, critical, skinIndex));
 
             setInitialState(display, mode, scale);
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+
+            SchedulerUtil.runEntityTaskLater(plugin, display, () -> {
                 if (display.isValid()) playAnimation(display, mode, scale, duration);
             }, 1L);
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+
+            SchedulerUtil.runEntityTaskLater(plugin, display, () -> {
                 if (display.isValid()) display.remove();
             }, duration + 10L);
         });
@@ -106,7 +116,7 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
                 int h = duration / 2;
                 display.setInterpolationDuration(h);
                 display.setTransformation(new Transformation(new Vector3f(0, 1.0f, -0.3f), new AxisAngle4f((float)Math.toRadians(-170), 1, 0, 0), new Vector3f(scale * 1.1f, scale * 1.1f, scale * 1.1f), new AxisAngle4f()));
-                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                SchedulerUtil.runEntityTaskLater(plugin, display, () -> {
                     if (display.isValid()) {
                         display.setInterpolationDuration(h);
                         display.setTransformation(new Transformation(new Vector3f(0, 1.8f, -0.6f), new AxisAngle4f((float)Math.toRadians(-350), 1, 0, 0), new Vector3f(scale * 1.2f, scale * 1.2f, scale * 1.2f), new AxisAngle4f()));
@@ -122,7 +132,7 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
                 int h = duration / 2;
                 display.setInterpolationDuration(h);
                 display.setTransformation(new Transformation(new Vector3f(0, 1.4f, 0), new AxisAngle4f(), new Vector3f(scale * 1.2f, scale * 1.2f, scale * 1.2f), new AxisAngle4f()));
-                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                SchedulerUtil.runEntityTaskLater(plugin, display, () -> {
                     if (display.isValid()) {
                         display.setInterpolationDuration(h);
                         display.setTransformation(new Transformation(new Vector3f(0, 0.4f, 0), new AxisAngle4f(), new Vector3f(scale, scale, scale), new AxisAngle4f()));
@@ -142,11 +152,15 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
             s.setCustomNameVisible(true);
             s.setCustomName((critical ? "§c" : "§f") + damage);
             s.getPersistentDataContainer().set(tagKey, PersistentDataType.INTEGER, 1);
-            Bukkit.getScheduler().runTaskLater(plugin, s::remove, plugin.getAnimationDuration());
+            SchedulerUtil.runEntityTaskLater(plugin, s, s::remove, plugin.getAnimationDuration());
         });
     }
 
     private Component buildComponent(int damage, boolean critical, int skinIndex) {
+        if (plugin.isNoResourcePack()) {
+            return Component.text(Integer.toString(damage), critical ? NamedTextColor.RED : NamedTextColor.WHITE)
+                    .font(DEFAULT_FONT);
+        }
         int clamped = Math.max(0, Math.min(skinIndex, plugin.getMaxSkinIndex()));
         String name = (critical ? "critical" : "normal") + clamped;
         Key key = fontKeyCache.computeIfAbsent(name, k -> Key.key("damagedisplay", k));
@@ -154,18 +168,60 @@ public final class DamageDisplayRendererImpl implements DamageDisplayRenderer {
     }
 
     public DamageData buildDamageData(EntityDamageByEntityEvent event, double baseDamage) {
-        Entity damager = event.getDamager();
+        Entity rawDamager = event.getDamager();
+        Entity damager = resolveDamager(rawDamager);
         Entity victim = event.getEntity();
-        int skin = (damager instanceof Player p) ? plugin.getPlayerSkin(p.getUniqueId()) : 0;
-        boolean crit = false;
-        if (Bukkit.getPluginManager().isPluginEnabled("MythicMobs") && damager instanceof LivingEntity le) {
-            try {
-                var caster = MythicProvider.get().getSkillManager().getCaster(BukkitAdapter.adapt(le));
-                if (caster != null && caster.hasAura("critical")) crit = true;
-            } catch (Exception ignored) {}
-        }
+        Entity skinSource = damager instanceof Player ? damager : (rawDamager instanceof Player ? rawDamager : damager);
+        int skin = (!plugin.isNoResourcePack() && skinSource instanceof Player p) ? plugin.getPlayerSkin(p.getUniqueId()) : 0;
+
+        // OVERCRIT/CRIT skills apply Aura{aura=critical}. Depending on totem/onTick/@eir patterns,
+        // that aura may sit on the damager, the victim, a projectile shooter, or a totem parent.
+        boolean crit = event.isCritical()
+                || hasCriticalAura(damager)
+                || hasCriticalAura(victim)
+                || (damager != rawDamager && hasCriticalAura(rawDamager));
+
         Vector off = plugin.getMobOffset(victim);
         return new DamageData(crit, skin, new double[]{off.getX(), off.getY(), off.getZ()}, baseDamage);
+    }
+
+    private Entity resolveDamager(Entity damager) {
+        if (damager instanceof Projectile projectile && projectile.getShooter() instanceof Entity shooter) {
+            return shooter;
+        }
+        return damager;
+    }
+
+    private boolean hasCriticalAura(Entity entity) {
+        if (entity == null || !Bukkit.getPluginManager().isPluginEnabled("MythicMobs")) return false;
+        try {
+            var mmInst = MythicBukkit.inst().getMobManager().getMythicMobInstance(entity);
+            if (mmInst != null) {
+                if (mmInst.hasAura("critical")) return true;
+                var parent = mmInst.getParent();
+                if (parent != null && parent.isPresent()) {
+                    Entity parentEntity = BukkitAdapter.adapt(parent.get());
+                    if (parentEntity != null && parentEntity != entity && hasCriticalAuraDirect(parentEntity)) {
+                        return true;
+                    }
+                }
+            }
+            return hasCriticalAuraDirect(entity);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private boolean hasCriticalAuraDirect(Entity entity) {
+        if (!(entity instanceof LivingEntity living)) return false;
+        try {
+            var mmInst = MythicBukkit.inst().getMobManager().getMythicMobInstance(entity);
+            if (mmInst != null && mmInst.hasAura("critical")) return true;
+            var caster = MythicProvider.get().getSkillManager().getCaster(BukkitAdapter.adapt(living));
+            return caster != null && caster.hasAura("critical");
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private boolean isTextDisplaySupported() {

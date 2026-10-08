@@ -2,7 +2,7 @@ package com.gmail.bobason01.listener;
 
 import com.gmail.bobason01.DamageDisplay;
 import com.gmail.bobason01.DamageDisplayRendererImpl;
-import org.bukkit.Bukkit;
+import com.gmail.bobason01.util.SchedulerUtil;
 import org.bukkit.Location;
 import org.bukkit.entity.Damageable;
 import org.bukkit.entity.Entity;
@@ -11,17 +11,15 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.ArrayDeque;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 public final class EntityDamageListener implements Listener {
 
     private final DamageDisplay plugin;
-    private final DamageDisplayRendererImpl renderer;
 
-    private final Map<Integer, DamageEventData> pendingDamages = new HashMap<>(128, 0.75f);
-    private final ArrayDeque<DamageEventData> dataPool = new ArrayDeque<>(128);
+    private final ConcurrentHashMap<Integer, DamageEventData> pendingDamages = new ConcurrentHashMap<>(128);
+    private final ConcurrentLinkedQueue<DamageEventData> dataPool = new ConcurrentLinkedQueue<>();
 
     private static class DamageEventData {
         Entity victim;
@@ -43,9 +41,10 @@ public final class EntityDamageListener implements Listener {
 
     public EntityDamageListener(DamageDisplay plugin, DamageDisplayRendererImpl renderer) {
         this.plugin = plugin;
-        this.renderer = renderer;
+    }
 
-        Bukkit.getScheduler().runTaskTimer(plugin, this::processPendingDamages, 1L, 1L);
+    private DamageDisplayRendererImpl renderer() {
+        return plugin.getRenderer();
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -59,54 +58,54 @@ public final class EntityDamageListener implements Listener {
         if (finalDamage <= 0.01) return;
 
         final int entityId = victim.getEntityId();
-        DamageEventData data = pendingDamages.get(entityId);
+        final DamageDisplayRendererImpl renderer = renderer();
+        if (renderer == null) return;
 
-        if (data != null) {
-            // 한 틱 내에 여러 번 데미지가 들어올 경우 합산 처리 (성능 최적화)
-            data.damage += finalDamage;
+        pendingDamages.compute(entityId, (id, data) -> {
+            if (data == null) {
+                data = dataPool.poll();
+                if (data == null) data = new DamageEventData();
 
-            var renderData = renderer.buildDamageData(event, finalDamage);
-            if (renderData.critical()) {
-                data.critical = true;
+                var renderData = renderer.buildDamageData(event, finalDamage);
+                data.victim = victim;
+                data.hitLocation = victim.getLocation();
+                data.damage = finalDamage;
+                data.critical = renderData.critical();
+                data.skinIndex = renderData.skinIndex();
+                data.offset = renderData.offset();
+
+                SchedulerUtil.runEntityTaskLater(plugin, victim, () -> processPendingDamage(entityId), 1L);
+            } else {
+                data.damage += finalDamage;
+                var renderData = renderer.buildDamageData(event, finalDamage);
+                if (renderData.critical()) {
+                    data.critical = true;
+                }
             }
-        } else {
-            data = dataPool.isEmpty() ? new DamageEventData() : dataPool.pop();
-            var renderData = renderer.buildDamageData(event, finalDamage);
-
-            data.victim = victim;
-            data.hitLocation = victim.getLocation();
-            data.damage = finalDamage;
-            data.critical = renderData.critical();
-            data.skinIndex = renderData.skinIndex();
-            data.offset = renderData.offset();
-
-            pendingDamages.put(entityId, data);
-        }
+            return data;
+        });
     }
 
-    private void processPendingDamages() {
-        if (pendingDamages.isEmpty()) return;
+    private void processPendingDamage(int entityId) {
+        DamageEventData data = pendingDamages.remove(entityId);
+        if (data == null) return;
 
-        for (DamageEventData data : pendingDamages.values()) {
-            final int shown = (int) Math.round(data.damage);
-
-            if (shown > 0) {
-                renderer.displayWithThrottling(
-                        data.victim,
-                        data.hitLocation,
-                        shown,
-                        data.critical,
-                        data.skinIndex,
-                        data.offset[0],
-                        data.offset[1],
-                        data.offset[2]
-                );
-            }
-
-            data.reset();
-            dataPool.push(data);
+        final DamageDisplayRendererImpl renderer = renderer();
+        final int shown = (int) Math.round(data.damage);
+        if (shown > 0 && renderer != null) {
+            renderer.displayWithThrottling(
+                    data.victim,
+                    data.hitLocation,
+                    shown,
+                    data.critical,
+                    data.skinIndex,
+                    data.offset[0],
+                    data.offset[1],
+                    data.offset[2]
+            );
         }
 
-        pendingDamages.clear();
+        data.reset();
+        dataPool.offer(data);
     }
 }
